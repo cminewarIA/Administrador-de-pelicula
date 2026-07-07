@@ -10,7 +10,10 @@ VERSION="${1:-1.0.0}"
 VERSION="${VERSION#[vV]}"
 
 echo "=== 1. Building Frontend and Backend ==="
-npm install
+if [ ! -d "node_modules" ]; then
+  echo "node_modules not found, running npm install..."
+  npm install
+fi
 npm run build
 
 echo "=== 2. Setting up Debian directory structure for version ${VERSION} ==="
@@ -24,6 +27,7 @@ mkdir -p "$BUILD_DIR/usr/bin"
 mkdir -p "$BUILD_DIR/usr/share/movie-organizer"
 mkdir -p "$BUILD_DIR/usr/share/applications"
 mkdir -p "$BUILD_DIR/usr/share/pixmaps"
+mkdir -p "$BUILD_DIR/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "$BUILD_DIR/lib/systemd/system"
 
 echo "=== 3. Creating DEBIAN/control ==="
@@ -60,6 +64,17 @@ if [ -d /run/systemd/system ]; then
     systemctl restart movie-organizer || true
 fi
 
+# Update desktop and icon databases
+if [ -x /usr/bin/update-desktop-database ]; then
+    echo "Updating desktop database..."
+    update-desktop-database -q || true
+fi
+
+if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    echo "Updating GTK icon cache..."
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+fi
+
 echo "¡Organizador de Películas instalado/actualizado con éxito!"
 echo "Puedes iniciarlo desde el buscador de aplicaciones o con: movie-organizer"
 exit 0
@@ -89,6 +104,15 @@ set -e
 # Reload systemd daemon if service is removed or purged
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
+fi
+
+# Update desktop and icon databases
+if [ -x /usr/bin/update-desktop-database ]; then
+    update-desktop-database -q || true
+fi
+
+if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
 fi
 
 exit 0
@@ -171,6 +195,7 @@ EOF
 
 # Copy our beautiful scalable vector SVG icon
 cp ./assets/movie-organizer.svg "$BUILD_DIR/usr/share/pixmaps/movie-organizer.svg"
+cp ./assets/movie-organizer.svg "$BUILD_DIR/usr/share/icons/hicolor/scalable/apps/movie-organizer.svg"
 
 echo "=== 8. Copying build artifacts ==="
 cp dist/server.cjs "$BUILD_DIR/usr/share/movie-organizer/server.cjs"
