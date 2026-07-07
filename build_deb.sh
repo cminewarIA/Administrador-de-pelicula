@@ -38,7 +38,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Maintainer: Organizador de Películas AI <CMineWar1.5@gmail.com>
-Depends: nodejs (>= 16)
+Depends: nodejs (>= 16), python3, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0 | gir1.2-webkit2-4.1
 Description: Organizador inteligente de películas con Emby y Gemini AI.
  Escanea directorios de descarga de películas, lee metadatos de Emby
  y renombra los archivos con el formato estandarizado 'Título [IMDbID]'.
@@ -145,9 +145,14 @@ if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     done
   fi
   
-  # Open web UI in default browser
-  echo "Abriendo Organizador de Películas en el navegador..."
-  xdg-open "http://localhost:3000" > /dev/null 2>&1 &
+  # Launch native PyGObject WebKit window
+  echo "Iniciando interfaz nativa..."
+  if python3 /usr/share/movie-organizer/gui.py > /tmp/movie-organizer-gui.log 2>&1; then
+    echo "Interfaz nativa cerrada con éxito."
+  else
+    echo "La interfaz nativa falló o no está disponible. Abriendo en navegador..."
+    xdg-open "http://localhost:3000" > /dev/null 2>&1 &
+  fi
 else
   # Running in non-graphical context (e.g. systemd or ssh terminal)
   echo "Iniciando Organizador de Películas en modo servicio (Puerto 3000)..."
@@ -158,6 +163,74 @@ else
 fi
 EOF
 chmod 755 "$BUILD_DIR/usr/bin/movie-organizer"
+
+echo "=== 5b. Creating native PyGObject WebKit GUI wrapper ==="
+cat << 'EOF' > "$BUILD_DIR/usr/share/movie-organizer/gui.py"
+#!/usr/bin/env python3
+import sys
+import os
+import gi
+
+# Setup GTK & WebKit with fallback versions
+try:
+    gi.require_version('Gtk', '3.0')
+    try:
+        gi.require_version('WebKit2', '4.1')
+    except (ValueError, AttributeError):
+        try:
+            gi.require_version('WebKit2', '4.0')
+        except (ValueError, AttributeError):
+            pass
+    from gi.repository import Gtk, WebKit2, Gdk
+except Exception as e:
+    print(f"Error cargando dependencias de interfaz nativa GTK/WebKit: {e}", file=sys.stderr)
+    print("Por favor, asegúrate de instalar python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0 o gir1.2-webkit2-4.1", file=sys.stderr)
+    sys.exit(1)
+
+class MovieOrganizerApp(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Organizador de Películas AI")
+        self.set_default_size(1280, 800)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        
+        # Set window icon if available
+        icon_path = "/usr/share/pixmaps/movie-organizer.svg"
+        if os.path.exists(icon_path):
+            try:
+                self.set_icon_from_file(icon_path)
+            except Exception:
+                pass
+                
+        # Main vertical container
+        self.vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add(self.vbox)
+        
+        # Web View
+        self.webview = WebKit2.WebView()
+        
+        # Enable developer tools and performance settings
+        settings = self.webview.get_settings()
+        settings.set_enable_developer_extras(True)
+        settings.set_enable_webgl(True)
+        settings.set_enable_html5_database(True)
+        settings.set_enable_html5_local_storage(True)
+        
+        # Load localhost server
+        self.webview.load_uri("http://localhost:3000")
+        
+        # Add Webview to vbox inside scrolled window
+        self.scrolled_window = Gtk.ScrolledWindow()
+        self.scrolled_window.add(self.webview)
+        self.vbox.pack_start(self.scrolled_window, True, True, 0)
+        
+        self.connect("destroy", Gtk.main_quit)
+        self.show_all()
+
+if __name__ == "__main__":
+    app = MovieOrganizerApp()
+    Gtk.main()
+EOF
+chmod 755 "$BUILD_DIR/usr/share/movie-organizer/gui.py"
 
 echo "=== 6. Creating Systemd service configuration ==="
 cat << 'EOF' > "$BUILD_DIR/lib/systemd/system/movie-organizer.service"
