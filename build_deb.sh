@@ -55,6 +55,7 @@ set -e
 
 # Make launcher executable
 chmod +x /usr/bin/movie-organizer
+chmod +x /usr/bin/cineorganize-ai 2>/dev/null || true
 
 # Handle systemd setup if systemd is active on the host
 if [ -d /run/systemd/system ]; then
@@ -163,6 +164,7 @@ else
 fi
 EOF
 chmod 755 "$BUILD_DIR/usr/bin/movie-organizer"
+ln -sf movie-organizer "$BUILD_DIR/usr/bin/cineorganize-ai"
 
 echo "=== 5b. Creating native PyGObject WebKit GUI wrapper ==="
 cat << 'EOF' > "$BUILD_DIR/usr/share/movie-organizer/gui.py"
@@ -189,12 +191,15 @@ except Exception as e:
 
 class MovieOrganizerApp(Gtk.Window):
     def __init__(self):
-        super().__init__(title="Organizador de Películas AI")
+        super().__init__(title="CineOrganize AI")
         self.set_default_size(1280, 800)
         self.set_position(Gtk.WindowPosition.CENTER)
         
         # Set window icon if available
-        icon_path = "/usr/share/pixmaps/movie-organizer.svg"
+        icon_path = "/usr/share/pixmaps/cineorganize-ai.svg"
+        if not os.path.exists(icon_path):
+            icon_path = "/usr/share/pixmaps/movie-organizer.svg"
+            
         if os.path.exists(icon_path):
             try:
                 self.set_icon_from_file(icon_path)
@@ -251,24 +256,41 @@ WantedBy=multi-user.target
 EOF
 
 echo "=== 7. Creating Desktop Entry and Icon ==="
-# Desktop Entry to appear in Ubuntu applications launcher menu
+# Desktop Entry to appear in Ubuntu applications launcher menu (for movie-organizer)
 cat << 'EOF' > "$BUILD_DIR/usr/share/applications/movie-organizer.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Organizador de Películas AI
+Name=CineOrganize AI
 Comment=Estandariza tus películas usando metadatos inteligentes de Emby, TMDb, Trakt y Gemini
-Exec=/usr/bin/movie-organizer
-Icon=movie-organizer
+Exec=/usr/bin/cineorganize-ai
+Icon=cineorganize-ai
 Terminal=false
 Categories=Utility;FileTools;Database;
-Keywords=movie;organizer;emby;gemini;tmdb;trakt;
+Keywords=movie;organizer;emby;gemini;tmdb;trakt;cine;
+StartupNotify=true
+EOF
+
+# Desktop Entry to appear in Ubuntu applications launcher menu (for cineorganize-ai)
+cat << 'EOF' > "$BUILD_DIR/usr/share/applications/cineorganize-ai.desktop"
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CineOrganize AI
+Comment=Estandariza tus películas usando metadatos inteligentes de Emby, TMDb, Trakt y Gemini
+Exec=/usr/bin/cineorganize-ai
+Icon=cineorganize-ai
+Terminal=false
+Categories=Utility;FileTools;Database;
+Keywords=movie;organizer;emby;gemini;tmdb;trakt;cine;
 StartupNotify=true
 EOF
 
 # Copy our beautiful scalable vector SVG icon
 cp ./assets/movie-organizer.svg "$BUILD_DIR/usr/share/pixmaps/movie-organizer.svg"
 cp ./assets/movie-organizer.svg "$BUILD_DIR/usr/share/icons/hicolor/scalable/apps/movie-organizer.svg"
+cp ./assets/cineorganize-ai.svg "$BUILD_DIR/usr/share/pixmaps/cineorganize-ai.svg"
+cp ./assets/cineorganize-ai.svg "$BUILD_DIR/usr/share/icons/hicolor/scalable/apps/cineorganize-ai.svg"
 
 echo "=== 8. Copying build artifacts ==="
 cp dist/server.cjs "$BUILD_DIR/usr/share/movie-organizer/server.cjs"
