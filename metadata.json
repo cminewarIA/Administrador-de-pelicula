@@ -1,0 +1,6 @@
+{
+  "name": "Organizador de Películas",
+  "description": "Aplicación de organización inteligente de películas usando Emby y Gemini AI, con exportador de instalador .deb para Ubuntu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
