@@ -94,11 +94,17 @@ export default function ReportHistory() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800 mb-6">
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 bg-orange-500/10 text-orange-400 text-xs font-semibold rounded border border-orange-500/20 font-mono">
+              <span className={`px-2.5 py-0.5 text-xs font-semibold rounded border font-mono ${
+                selectedReport.id.startsWith("error_") || selectedReport.organizeType === "N/A"
+                  ? "bg-red-500/10 text-red-400 border-red-500/20"
+                  : "bg-orange-500/10 text-orange-400 border-orange-500/20"
+              }`}>
                 ID: {selectedReport.id}
               </span>
               <h3 className="text-xl font-display font-semibold text-white tracking-tight">
-                Detalles del Informe de Procesamiento
+                {selectedReport.id.startsWith("error_") || selectedReport.organizeType === "N/A"
+                  ? "Informe de Error de Sistema"
+                  : "Detalles del Informe de Procesamiento"}
               </h3>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1.5 font-mono">
@@ -270,14 +276,30 @@ export default function ReportHistory() {
                 className="p-4 hover:bg-slate-900/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors"
               >
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-orange-500/10 text-orange-400 rounded-lg border border-orange-500/20 shrink-0">
-                    <FileText className="w-5 h-5" />
+                  <div className={`p-2 rounded-lg border shrink-0 ${
+                    report.id.startsWith("error_") || report.organizeType === "N/A"
+                      ? "bg-red-500/10 text-red-400 border-red-500/20"
+                      : "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                  }`}>
+                    {report.id.startsWith("error_") || report.organizeType === "N/A" ? (
+                      <XCircle className="w-5 h-5 text-red-500" />
+                    ) : (
+                      <FileText className="w-5 h-5" />
+                    )}
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-white font-mono flex items-center gap-2">
                       {report.id}
-                      <span className="px-1.5 py-0.2 bg-slate-800 text-slate-300 text-[10px] rounded border border-slate-700 font-normal">
-                        {report.organizeType === "flat" ? "Organización Plana" : "Orden Alfabético"}
+                      <span className={`px-1.5 py-0.2 text-[10px] rounded border font-normal ${
+                        report.id.startsWith("error_") || report.organizeType === "N/A"
+                          ? "bg-red-500/10 text-red-400 border-red-500/20 font-bold uppercase tracking-wider"
+                          : "bg-slate-800 text-slate-300 border-slate-700"
+                      }`}>
+                        {report.organizeType === "flat" 
+                          ? "Organización Plana" 
+                          : report.organizeType === "alphabetical" 
+                          ? "Orden Alfabético" 
+                          : "Error de Sistema"}
                       </span>
                     </h4>
                     <p className="text-xs text-slate-400 mt-1 flex items-center gap-1 font-mono">
@@ -286,8 +308,8 @@ export default function ReportHistory() {
                     </p>
                     <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
                       <span>Procesados: <strong className="text-white">{report.totalProcessed}</strong></span>
-                      <span className="text-green-400">Correctos: <strong className="text-green-300">{report.successCount}</strong></span>
-                      <span className="text-red-400">Errores: <strong className="text-red-300">{report.errorCount}</strong></span>
+                      <span className="text-green-400 font-medium">Correctos: <strong className="text-green-300">{report.successCount}</strong></span>
+                      <span className="text-red-400 font-medium font-mono">Errores: <strong className="text-red-300">{report.errorCount}</strong></span>
                     </div>
                   </div>
                 </div>
@@ -295,8 +317,16 @@ export default function ReportHistory() {
                 <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
                   <div className="text-right shrink-0">
                     <span className="text-[10px] text-slate-500 block font-semibold uppercase tracking-wider">Tasa de Éxito</span>
-                    <span className={`text-sm font-bold block ${successRate >= 90 ? "text-green-400" : successRate >= 50 ? "text-yellow-400" : "text-red-400"}`}>
-                      {successRate}%
+                    <span className={`text-sm font-bold block ${
+                      report.id.startsWith("error_") || report.organizeType === "N/A"
+                        ? "text-red-500 font-black"
+                        : successRate >= 90 
+                        ? "text-green-400" 
+                        : successRate >= 50 
+                        ? "text-yellow-400" 
+                        : "text-red-400"
+                    }`}>
+                      {report.id.startsWith("error_") || report.organizeType === "N/A" ? "FALLO" : `${successRate}%`}
                     </span>
                   </div>
 

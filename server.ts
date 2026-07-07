@@ -159,9 +159,74 @@ const LOCAL_MOVIE_DB: Record<string, { title: string; year: number; imdbId: stri
 
 // Seed workspace with realistic samples
 function seedWorkspace() {
-  fs.mkdirSync(downloadsFolder, { recursive: true });
-  fs.mkdirSync(organizedFolder, { recursive: true });
-  fs.mkdirSync(reportsFolder, { recursive: true });
+  try {
+    fs.mkdirSync(downloadsFolder, { recursive: true });
+    fs.mkdirSync(organizedFolder, { recursive: true });
+    fs.mkdirSync(reportsFolder, { recursive: true });
+
+    // Only seed mock files if it's a local folder
+    if (!downloadsFolder.includes("://")) {
+      const samples = [
+        {
+          folder: "Inception.2010.1080p",
+          filename: "Inception.2010.1080p.BluRay.mp4",
+          nfo: `<movie>
+  <title>Inception</title>
+  <year>2010</year>
+  <uniqueid type="imdb">tt1375666</uniqueid>
+</movie>`
+        },
+        {
+          folder: "Interstellar.2014.Bluray",
+          filename: "Interstellar_2014_FullMovie.mkv",
+          nfo: `<movie>
+  <title>Interstellar</title>
+  <year>2014</year>
+</movie>`
+        },
+        {
+          folder: "",
+          filename: "El.Padrino.1972.Spanish.Bluray.mp4",
+          nfo: `<movie>
+  <title>El Padrino</title>
+  <year>1972</year>
+</movie>`
+        },
+        {
+          folder: "Sci-Fi/Avatar.The.Way.Of.Water.2022.WEB-DL",
+          filename: "avatar.the.way.of.water.2022.1080p.mkv",
+          nfo: null
+        },
+        {
+          folder: "Anime/Spirited Away (2001)",
+          filename: "spirited.away.anime.avi",
+          nfo: `<movie>
+  <title>Spirited Away</title>
+  <year>2001</year>
+  <uniqueid type="imdb">tt0245429</uniqueid>
+</movie>`
+        }
+      ];
+
+      for (const sample of samples) {
+        const folderPath = sample.folder ? path.join(downloadsFolder, sample.folder) : downloadsFolder;
+        fs.mkdirSync(folderPath, { recursive: true });
+        
+        const filePath = path.join(folderPath, sample.filename);
+        // Write dummy 100KB file
+        fs.writeFileSync(filePath, Buffer.alloc(100 * 1024));
+
+        if (sample.nfo) {
+          const ext = path.extname(sample.filename);
+          const nfoPath = filePath.replace(ext, ".nfo");
+          fs.writeFileSync(nfoPath, sample.nfo, "utf-8");
+        }
+      }
+      console.log("Archivos de simulación de prueba sembrados físicamente en disco.");
+    }
+  } catch (err) {
+    console.error("Error al sembrar el workspace:", err);
+  }
 }
 
 // Call seed workspace on server boot
@@ -524,6 +589,21 @@ const smbExists = (client: any, subpath: string) =>
     });
   });
 
+function withTimeout<T>(promise: Promise<T>, ms: number, errMsg = "Tiempo de espera agotado (Timeout). El host remoto no responde."): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errMsg)), ms);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 async function runWithSmb<T>(urlStr: string, fn: (client: any, subpath: string) => Promise<T>): Promise<T> {
   const parsed = parseUrl(urlStr);
   if (parsed.protocol !== "smb") throw new Error("No es una dirección SMB válida.");
@@ -539,7 +619,8 @@ async function runWithSmb<T>(urlStr: string, fn: (client: any, subpath: string) 
 
   try {
     const subpath = parsed.subpath.replace(/\//g, "\\");
-    const res = await fn(client, subpath);
+    // Wrap with timeout of 10 seconds to handle DNS hang / unreachable host
+    const res = await withTimeout(fn(client, subpath), 10000, `El servidor SMB en ${parsed.host} no responde o es inaccesible.`);
     client.close();
     return res;
   } catch (err) {
@@ -555,13 +636,15 @@ async function runWithFtp<T>(urlStr: string, fn: (client: ftp.Client, subpath: s
   const client = new ftp.Client();
   client.ftp.verbose = false;
   try {
-    await client.access({
+    // Wrap access inside withTimeout to handle DNS/host connect timeouts
+    await withTimeout(client.access({
       host: parsed.host,
       port: parsed.port,
       user: parsed.username,
       password: parsed.password,
       secure: false
-    });
+    }), 10000, `El servidor FTP en ${parsed.host} no responde o es inaccesible.`);
+    
     return await fn(client, parsed.subpath || "/");
   } finally {
     client.close();
@@ -772,13 +855,23 @@ async function getMovieFilesVFS(
   if (parsed.protocol === "file") {
     let results: any[] = [];
     const dir = parsed.fullPath;
-    if (!fs.existsSync(dir)) return [];
+    const isRoot = dirUrl === baseDirUrl;
+
+    if (!fs.existsSync(dir)) {
+      if (isRoot) {
+        throw new Error(`El directorio de origen local "${dir}" no existe.`);
+      }
+      return [];
+    }
     
     let list: string[] = [];
     try {
       list = fs.readdirSync(dir);
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Error al leer el directorio ${dir}:`, e);
+      if (isRoot) {
+        throw new Error(`Error al leer el directorio de origen "${dir}": ${e.message}`);
+      }
       return [];
     }
 
@@ -842,7 +935,7 @@ async function getMovieFilesVFS(
     return await runWithSmb(dirUrl, async (client, subpath) => {
       const results: any[] = [];
       
-      const scanDir = async (currentSubpath: string) => {
+      const scanDir = async (currentSubpath: string, isRoot = false) => {
         try {
           const files = await smbReaddir(client, currentSubpath);
           for (const file of files) {
@@ -856,7 +949,7 @@ async function getMovieFilesVFS(
 
               if (isDir) {
                 if (recursive) {
-                  await scanDir(fullSubpath);
+                  await scanDir(fullSubpath, false);
                 }
               } else {
                 const ext = path.extname(file).toLowerCase();
@@ -904,12 +997,15 @@ async function getMovieFilesVFS(
               console.error(`Error procesando elemento SMB ${file} en ${currentSubpath}:`, err);
             }
           }
-        } catch (dirErr) {
+        } catch (dirErr: any) {
           console.error(`Error leyendo directorio SMB ${currentSubpath}:`, dirErr);
+          if (isRoot) {
+            throw new Error(`Error al leer el directorio SMB raíz "${currentSubpath}": ${dirErr.message}`);
+          }
         }
       };
 
-      await scanDir(subpath);
+      await scanDir(subpath, true);
       return results;
     });
 
@@ -917,7 +1013,7 @@ async function getMovieFilesVFS(
     return await runWithFtp(dirUrl, async (client, subpath) => {
       const results: any[] = [];
 
-      const scanDir = async (currentSubpath: string) => {
+      const scanDir = async (currentSubpath: string, isRoot = false) => {
         try {
           const list = await client.list(currentSubpath);
           for (const item of list) {
@@ -925,7 +1021,7 @@ async function getMovieFilesVFS(
               const itemPath = currentSubpath.endsWith("/") ? `${currentSubpath}${item.name}` : `${currentSubpath}/${item.name}`;
               if (item.isDirectory) {
                 if (recursive) {
-                  await scanDir(itemPath);
+                  await scanDir(itemPath, false);
                 }
               } else {
                 const ext = path.extname(item.name).toLowerCase();
@@ -978,12 +1074,15 @@ async function getMovieFilesVFS(
           console.error(`Error procesando elemento FTP ${item.name} en ${currentSubpath}:`, err);
         }
       }
-      } catch (dirErr) {
+      } catch (dirErr: any) {
         console.error(`Error leyendo directorio FTP ${currentSubpath}:`, dirErr);
+        if (isRoot) {
+          throw new Error(`Error al leer el directorio FTP raíz "${currentSubpath}": ${dirErr.message}`);
+        }
       }
     };
 
-    await scanDir(subpath);
+    await scanDir(subpath, true);
     return results;
   });
 }
@@ -1195,10 +1294,18 @@ app.get("/api/organize/scan", async (req, res) => {
       // Registrar error de escaneo en los reportes históricos
       saveErrorReport("Escaneo", scanErr.message, { downloadsFolder });
 
-      // Offline remote simulation sandbox fallback
+      const isRemote = downloadsFolder.includes("://");
+      const isCustomLocal = !isRemote && downloadsFolder !== "/tmp/movie_organizer/downloads";
+
+      if (isRemote || isCustomLocal) {
+        // Propagar el error estrictamente para rutas personalizadas o remotas
+        throw scanErr;
+      }
+
+      // Offline remote simulation sandbox fallback (solo para ruta local demo predeterminada)
       res.write(JSON.stringify({
         type: "log",
-        message: `Servidor remoto desconectado o inaccesible: ${scanErr.message}. Iniciando demostración en sandbox...`
+        message: `Servidor local inaccesible: ${scanErr.message}. Iniciando demostración en sandbox...`
       }) + "\n");
 
       movies = await getMockMovieFiles();
@@ -1520,10 +1627,15 @@ app.get("/api/organize/reports", (req, res) => {
     if (!fs.existsSync(reportsFolder)) return res.json({ reports: [] });
     const files = fs.readdirSync(reportsFolder).filter(f => f.endsWith(".json"));
     
-    const reports = files.map((file) => {
-      const content = fs.readFileSync(path.join(reportsFolder, file), "utf-8");
-      return JSON.parse(content);
-    });
+    const reports: any[] = [];
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(reportsFolder, file), "utf-8");
+        reports.push(JSON.parse(content));
+      } catch (parseErr) {
+        console.error(`Error al parsear el reporte ${file}:`, parseErr);
+      }
+    }
 
     reports.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     res.json({ reports });
