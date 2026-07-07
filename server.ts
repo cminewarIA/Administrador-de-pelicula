@@ -1267,6 +1267,41 @@ app.post("/api/workspace/reset", (req, res) => {
 
 // 4. Scan downloads folder with streaming progress
 app.get("/api/organize/scan", async (req, res) => {
+  const isStream = req.query.stream !== "false";
+
+  if (!isStream) {
+    try {
+      const recursive = req.query.recursive !== "false";
+      let movies: any[] = [];
+      try {
+        movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, recursive);
+      } catch (scanErr: any) {
+        let message = scanErr.message;
+        if (message.includes("EAI_AGAIN") || message.includes("ENOTFOUND") || message.includes("ETIMEDOUT") || message.includes("ECONNREFUSED")) {
+          message = `No se puede conectar al host remoto (${scanErr.message}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
+        }
+        
+        const enrichedErr = new Error(message);
+        saveErrorReport("Escaneo", enrichedErr.message, { downloadsFolder });
+
+        const isRemote = downloadsFolder.includes("://");
+        const isCustomLocal = !isRemote && downloadsFolder !== "/tmp/movie_organizer/downloads";
+
+        if (isRemote || isCustomLocal) {
+          throw enrichedErr;
+        }
+
+        movies = await getMockMovieFiles();
+      }
+
+      res.json({ type: "done", movies });
+    } catch (err: any) {
+      saveErrorReport("Escaneo", err.message, { downloadsFolder });
+      res.status(500).json({ error: err.message });
+    }
+    return;
+  }
+
   let headersSet = false;
   const ensureHeaders = () => {
     if (!headersSet) {

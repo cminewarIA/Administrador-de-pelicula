@@ -160,67 +160,99 @@ export default function App() {
     }
   };
 
-  // Scan folder for movies with real-time stream decoding
+  // Scan folder for movies with real-time stream decoding and robust standard AJAX fallback
   const scanDownloads = async () => {
     setIsScanning(true);
     setRecentReport(null);
     setScanningLogs([]);
     addLog(`Escaneando carpeta de origen: ${downloadsPath} (Subcarpetas: ${recursiveScan ? 'SÍ' : 'NO'})`, "info");
     try {
-      const res = await fetch(`/api/organize/scan?recursive=${recursiveScan}`);
-      if (!res.ok) {
-        const errText = await res.text();
-        let errMsg = errText;
-        try {
-          const parsed = JSON.parse(errText);
-          errMsg = parsed.error || parsed.message || errText;
-        } catch (_) {}
-        throw new Error(errMsg);
-      }
-      if (!res.body) {
-        throw new Error("El servidor no soporta la transmisión de progreso de escaneo.");
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        // Keep the last partial line in the buffer
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
+      try {
+        const res = await fetch(`/api/organize/scan?recursive=${recursiveScan}`);
+        if (!res.ok) {
+          const errText = await res.text();
+          let errMsg = errText;
           try {
-            const data = JSON.parse(line);
-            if (data.type === "scan") {
-              const nfoInfo = data.hasNfo ? ` (NFO detectado${data.embyTitle ? `: ${data.embyTitle}` : ""})` : " (Sin NFO)";
-              setScanningLogs(prev => [...prev, data.file]);
-              addLog(`[LECTURA] Leyendo archivo: ${data.file}${nfoInfo}`, "info");
-            } else if (data.type === "log") {
-              addLog(data.message, "warning");
-            } else if (data.type === "done") {
-              if (data.movies) {
-                const moviesList = data.movies.map((m: any) => ({
-                  ...m,
-                  status: "idle" as const
-                }));
-                setMovies(moviesList);
-                // Select all by default
-                setSelectedMovieIds(moviesList.map((m: any) => m.id));
-                addLog(`Escaneo completo. Encontradas ${moviesList.length} películas listas para procesar.`, "success");
+            const parsed = JSON.parse(errText);
+            errMsg = parsed.error || parsed.message || errText;
+          } catch (_) {}
+          throw new Error(errMsg);
+        }
+        if (!res.body) {
+          throw new Error("No body");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          // Keep the last partial line in the buffer
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              if (data.type === "scan") {
+                const nfoInfo = data.hasNfo ? ` (NFO detectado${data.embyTitle ? `: ${data.embyTitle}` : ""})` : " (Sin NFO)";
+                setScanningLogs(prev => [...prev, data.file]);
+                addLog(`[LECTURA] Leyendo archivo: ${data.file}${nfoInfo}`, "info");
+              } else if (data.type === "log") {
+                addLog(data.message, "warning");
+              } else if (data.type === "done") {
+                if (data.movies) {
+                  const moviesList = data.movies.map((m: any) => ({
+                    ...m,
+                    status: "idle" as const
+                  }));
+                  setMovies(moviesList);
+                  // Select all by default
+                  setSelectedMovieIds(moviesList.map((m: any) => m.id));
+                  addLog(`Escaneo completo. Encontradas ${moviesList.length} películas listas para procesar.`, "success");
+                }
+              } else if (data.type === "error") {
+                addLog(`Error reportado por el servidor: ${data.error}`, "error");
               }
-            } else if (data.type === "error") {
-              addLog(`Error reportado por el servidor: ${data.error}`, "error");
+            } catch (err: any) {
+              console.error("Error al decodificar línea de progreso de escaneo:", err);
             }
-          } catch (err: any) {
-            console.error("Error al decodificar línea de progreso de escaneo:", err);
           }
+        }
+      } catch (streamErr: any) {
+        console.warn("La transmisión en tiempo real falló o no es soportada, reintentando con método de carga tradicional...", streamErr);
+        addLog("Conexión de transmisión en tiempo real limitada por el cliente. Iniciando método tradicional de carga completa...", "warning");
+        
+        const res = await fetch(`/api/organize/scan?recursive=${recursiveScan}&stream=false`);
+        if (!res.ok) {
+          const errText = await res.text();
+          let errMsg = errText;
+          try {
+            const parsed = JSON.parse(errText);
+            errMsg = parsed.error || parsed.message || errText;
+          } catch (_) {}
+          throw new Error(errMsg);
+        }
+
+        const data = await res.json();
+        if (data.type === "done" && data.movies) {
+          const moviesList = data.movies.map((m: any) => ({
+            ...m,
+            status: "idle" as const
+          }));
+          setMovies(moviesList);
+          // Select all by default
+          setSelectedMovieIds(moviesList.map((m: any) => m.id));
+          addLog(`Escaneo completo (por método tradicional). Encontradas ${moviesList.length} películas listas para procesar.`, "success");
+        } else if (data.type === "error") {
+          throw new Error(data.error || "Error desconocido del servidor");
+        } else {
+          throw new Error("Formato de respuesta de escaneo inválido.");
         }
       }
     } catch (e: any) {
