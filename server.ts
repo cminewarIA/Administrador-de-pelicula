@@ -120,12 +120,12 @@ function seedWorkspace() {
       nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>El Padrino</title>\n  <year>1972</year>\n</movie>` // Spanish title, missing IMDb ID!
     },
     {
-      folder: "Avatar.The.Way.Of.Water.2022.WEB-DL",
+      folder: "Sci-Fi/Avatar.The.Way.Of.Water.2022.WEB-DL",
       filename: "avatar.the.way.of.water.2022.1080p.mkv",
       nfo: null // No NFO file! Completely raw download
     },
     {
-      folder: "Spirited Away (2001)",
+      folder: "Anime/Spirited Away (2001)",
       filename: "spirited.away.anime.avi",
       nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>Spirited Away</title>\n  <year>2001</year>\n  <uniqueid type="imdb">tt0245429</uniqueid>\n</movie>`
     }
@@ -753,6 +753,7 @@ const VFS = {
 async function getMovieFilesVFS(
   dirUrl: string,
   baseDirUrl = dirUrl,
+  recursive = true,
   onFile?: (filePath: string, details: { hasNfo: boolean; embyTitle: string | null }) => void
 ): Promise<any[]> {
   const parsed = parseUrl(dirUrl);
@@ -761,54 +762,67 @@ async function getMovieFilesVFS(
     let results: any[] = [];
     const dir = parsed.fullPath;
     if (!fs.existsSync(dir)) return [];
-    const list = fs.readdirSync(dir);
+    
+    let list: string[] = [];
+    try {
+      list = fs.readdirSync(dir);
+    } catch (e) {
+      console.error(`Error al leer el directorio ${dir}:`, e);
+      return [];
+    }
 
     for (const file of list) {
-      const fullPath = path.join(dir, file);
-      const stat = fs.statSync(fullPath);
+      try {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
 
-      if (stat && stat.isDirectory()) {
-        const subResults = await getMovieFilesVFS(fullPath, baseDirUrl, onFile);
-        results = results.concat(subResults);
-      } else {
-        const ext = path.extname(file).toLowerCase();
-        const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
-        if (videoExtensions.includes(ext)) {
-          const nfoPath = fullPath.replace(ext, ".nfo");
-          let hasNfo = false;
-          let embyTitle = null;
-          let embyYear = null;
-          let embyImdb = null;
-
-          if (fs.existsSync(nfoPath)) {
-            hasNfo = true;
-            try {
-              const nfoContent = fs.readFileSync(nfoPath, "utf-8");
-              const parsedNfo = parseNfo(nfoContent);
-              embyTitle = parsedNfo.title;
-              embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
-              embyImdb = parsedNfo.imdbId;
-            } catch (e) {}
+        if (stat && stat.isDirectory()) {
+          if (recursive) {
+            const subResults = await getMovieFilesVFS(fullPath, baseDirUrl, recursive, onFile);
+            results = results.concat(subResults);
           }
+        } else {
+          const ext = path.extname(file).toLowerCase();
+          const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+          if (videoExtensions.includes(ext)) {
+            const nfoPath = fullPath.replace(ext, ".nfo");
+            let hasNfo = false;
+            let embyTitle = null;
+            let embyYear = null;
+            let embyImdb = null;
 
-          if (onFile) {
-            onFile(fullPath, { hasNfo, embyTitle });
+            if (fs.existsSync(nfoPath)) {
+              hasNfo = true;
+              try {
+                const nfoContent = fs.readFileSync(nfoPath, "utf-8");
+                const parsedNfo = parseNfo(nfoContent);
+                embyTitle = parsedNfo.title;
+                embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
+                embyImdb = parsedNfo.imdbId;
+              } catch (e) {}
+            }
+
+            if (onFile) {
+              onFile(fullPath, { hasNfo, embyTitle });
+            }
+
+            results.push({
+              id: Buffer.from(fullPath).toString("base64"),
+              originalPath: fullPath,
+              relativePath: path.relative(baseDirUrl, fullPath),
+              fileName: file,
+              extension: ext,
+              folderName: path.basename(path.dirname(fullPath)) === path.basename(baseDirUrl) ? "" : path.basename(path.dirname(fullPath)),
+              hasNfo,
+              sizeBytes: stat.size,
+              embyTitle,
+              embyYear,
+              embyImdb
+            });
           }
-
-          results.push({
-            id: Buffer.from(fullPath).toString("base64"),
-            originalPath: fullPath,
-            relativePath: path.relative(baseDirUrl, fullPath),
-            fileName: file,
-            extension: ext,
-            folderName: path.basename(path.dirname(fullPath)) === path.basename(baseDirUrl) ? "" : path.basename(path.dirname(fullPath)),
-            hasNfo,
-            sizeBytes: stat.size,
-            embyTitle,
-            embyYear,
-            embyImdb
-          });
         }
+      } catch (fileErr: any) {
+        console.error(`Error procesando archivo/directorio ${file} en ${dir}:`, fileErr);
       }
     }
     return results;
@@ -818,59 +832,69 @@ async function getMovieFilesVFS(
       const results: any[] = [];
       
       const scanDir = async (currentSubpath: string) => {
-        const files = await smbReaddir(client, currentSubpath);
-        for (const file of files) {
-          const fullSubpath = currentSubpath ? `${currentSubpath}\\${file}` : file;
-          let isDir = false;
-          try {
-            await smbReaddir(client, fullSubpath);
-            isDir = true;
-          } catch (e) {}
-
-          if (isDir) {
-            await scanDir(fullSubpath);
-          } else {
-            const ext = path.extname(file).toLowerCase();
-            const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
-            if (videoExtensions.includes(ext)) {
-              const fullUrl = `smb://${parsed.host}/${parsed.share}/${fullSubpath.replace(/\\/g, "/")}`;
-              const nfoSubpath = fullSubpath.replace(new RegExp(ext + "$", "i"), ".nfo");
-              let hasNfo = false;
-              let embyTitle = null;
-              let embyYear = null;
-              let embyImdb = null;
-
+        try {
+          const files = await smbReaddir(client, currentSubpath);
+          for (const file of files) {
+            try {
+              const fullSubpath = currentSubpath ? `${currentSubpath}\\${file}` : file;
+              let isDir = false;
               try {
-                const nfoExists = await smbExists(client, nfoSubpath);
-                if (nfoExists) {
-                  hasNfo = true;
-                  const nfoBuffer = await smbReadFile(client, nfoSubpath);
-                  const parsedNfo = parseNfo(nfoBuffer.toString("utf-8"));
-                  embyTitle = parsedNfo.title;
-                  embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
-                  embyImdb = parsedNfo.imdbId;
-                }
+                await smbReaddir(client, fullSubpath);
+                isDir = true;
               } catch (e) {}
 
-              if (onFile) {
-                onFile(fullUrl, { hasNfo, embyTitle });
-              }
+              if (isDir) {
+                if (recursive) {
+                  await scanDir(fullSubpath);
+                }
+              } else {
+                const ext = path.extname(file).toLowerCase();
+                const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+                if (videoExtensions.includes(ext)) {
+                  const fullUrl = `smb://${parsed.host}/${parsed.share}/${fullSubpath.replace(/\\/g, "/")}`;
+                  const nfoSubpath = fullSubpath.replace(new RegExp(ext + "$", "i"), ".nfo");
+                  let hasNfo = false;
+                  let embyTitle = null;
+                  let embyYear = null;
+                  let embyImdb = null;
 
-              results.push({
-                id: Buffer.from(fullUrl).toString("base64"),
-                originalPath: fullUrl,
-                relativePath: file,
-                fileName: file,
-                extension: ext,
-                folderName: currentSubpath.split("\\").pop() || "",
-                hasNfo,
-                sizeBytes: 104857600,
-                embyTitle,
-                embyYear,
-                embyImdb
-              });
+                  try {
+                    const nfoExists = await smbExists(client, nfoSubpath);
+                    if (nfoExists) {
+                      hasNfo = true;
+                      const nfoBuffer = await smbReadFile(client, nfoSubpath);
+                      const parsedNfo = parseNfo(nfoBuffer.toString("utf-8"));
+                      embyTitle = parsedNfo.title;
+                      embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
+                      embyImdb = parsedNfo.imdbId;
+                    }
+                  } catch (e) {}
+
+                  if (onFile) {
+                    onFile(fullUrl, { hasNfo, embyTitle });
+                  }
+
+                  results.push({
+                    id: Buffer.from(fullUrl).toString("base64"),
+                    originalPath: fullUrl,
+                    relativePath: file,
+                    fileName: file,
+                    extension: ext,
+                    folderName: currentSubpath.split("\\").pop() || "",
+                    hasNfo,
+                    sizeBytes: 104857600,
+                    embyTitle,
+                    embyYear,
+                    embyImdb
+                  });
+                }
+              }
+            } catch (err) {
+              console.error(`Error procesando elemento SMB ${file} en ${currentSubpath}:`, err);
             }
           }
+        } catch (dirErr) {
+          console.error(`Error leyendo directorio SMB ${currentSubpath}:`, dirErr);
         }
       };
 
@@ -883,21 +907,25 @@ async function getMovieFilesVFS(
       const results: any[] = [];
 
       const scanDir = async (currentSubpath: string) => {
-        const list = await client.list(currentSubpath);
-        for (const item of list) {
-          const itemPath = currentSubpath.endsWith("/") ? `${currentSubpath}${item.name}` : `${currentSubpath}/${item.name}`;
-          if (item.isDirectory) {
-            await scanDir(itemPath);
-          } else {
-            const ext = path.extname(item.name).toLowerCase();
-            const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
-            if (videoExtensions.includes(ext)) {
-              const fullUrl = `ftp://${parsed.host}${itemPath}`;
-              const nfoPath = itemPath.replace(new RegExp(ext + "$", "i"), ".nfo");
-              let hasNfo = false;
-              let embyTitle = null;
-              let embyYear = null;
-              let embyImdb = null;
+        try {
+          const list = await client.list(currentSubpath);
+          for (const item of list) {
+            try {
+              const itemPath = currentSubpath.endsWith("/") ? `${currentSubpath}${item.name}` : `${currentSubpath}/${item.name}`;
+              if (item.isDirectory) {
+                if (recursive) {
+                  await scanDir(itemPath);
+                }
+              } else {
+                const ext = path.extname(item.name).toLowerCase();
+                const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+                if (videoExtensions.includes(ext)) {
+                  const fullUrl = `ftp://${parsed.host}${itemPath}`;
+                  const nfoPath = itemPath.replace(new RegExp(ext + "$", "i"), ".nfo");
+                  let hasNfo = false;
+                  let embyTitle = null;
+                  let embyYear = null;
+                  let embyImdb = null;
 
               try {
                 const chunks: Buffer[] = [];
@@ -935,13 +963,19 @@ async function getMovieFilesVFS(
               });
             }
           }
+        } catch (err) {
+          console.error(`Error procesando elemento FTP ${item.name} en ${currentSubpath}:`, err);
         }
-      };
+      }
+      } catch (dirErr) {
+        console.error(`Error leyendo directorio FTP ${currentSubpath}:`, dirErr);
+      }
+    };
 
-      await scanDir(subpath);
-      return results;
-    });
-  }
+    await scanDir(subpath);
+    return results;
+  });
+}
 
   return [];
 }
@@ -977,7 +1011,7 @@ async function getMockMovieFiles(): Promise<any[]> {
       ext: ".mp4"
     },
     {
-      folder: "Avatar.The.Way.Of.Water.2022.WEB-DL",
+      folder: "Sci-Fi/Avatar.The.Way.Of.Water.2022.WEB-DL",
       filename: "avatar.the.way.of.water.2022.1080p.mkv",
       hasNfo: false,
       embyTitle: null,
@@ -986,7 +1020,7 @@ async function getMockMovieFiles(): Promise<any[]> {
       ext: ".mkv"
     },
     {
-      folder: "Spirited Away (2001)",
+      folder: "Anime/Spirited Away (2001)",
       filename: "spirited.away.anime.avi",
       hasNfo: true,
       embyTitle: "Spirited Away",
@@ -1130,9 +1164,11 @@ app.get("/api/organize/scan", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
+    const recursive = req.query.recursive !== "false";
+
     let movies: any[] = [];
     try {
-      movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, (filePath, details) => {
+      movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, recursive, (filePath, details) => {
         res.write(JSON.stringify({
           type: "scan",
           file: filePath,
@@ -1206,7 +1242,7 @@ app.post("/api/organize/process", async (req, res) => {
   let errorCount = 0;
 
   for (const item of items) {
-    const { originalPath, matchedTitle, matchedYear, matchedImdbId, extension } = item;
+    const { originalPath, matchedTitle, matchedYear, matchedImdbId, extension, customDestFolder } = item;
 
     const fileExists = await VFS.exists(originalPath);
     if (!fileExists) {
@@ -1224,11 +1260,14 @@ app.post("/api/organize/process", async (req, res) => {
       const newFileName = `${sanitizedTitle} [${matchedImdbId}]${extension}`;
       
       // Target directory setup
-      let targetDir = organizedFolder;
-      if (organizeType === "alphabetical") {
-        const firstLetter = sanitizedTitle.charAt(0).toUpperCase();
-        const letterFolder = /^[A-Z]$/.test(firstLetter) ? firstLetter : "#";
-        targetDir = joinVfsPaths(organizedFolder, letterFolder);
+      let targetDir = customDestFolder;
+      if (!targetDir) {
+        targetDir = organizedFolder;
+        if (organizeType === "alphabetical") {
+          const firstLetter = sanitizedTitle.charAt(0).toUpperCase();
+          const letterFolder = /^[A-Z]$/.test(firstLetter) ? firstLetter : "#";
+          targetDir = joinVfsPaths(organizedFolder, letterFolder);
+        }
       }
 
       await VFS.mkdir(targetDir);

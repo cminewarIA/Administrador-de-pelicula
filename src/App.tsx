@@ -47,6 +47,7 @@ export default function App() {
   const [organizeType, setOrganizeType] = useState<"flat" | "alphabetical">("alphabetical");
   const [cleanFolders, setCleanFolders] = useState(true);
   const [processSubtitles, setProcessSubtitles] = useState(true);
+  const [recursiveScan, setRecursiveScan] = useState(true);
 
   // Final processed report state
   const [recentReport, setRecentReport] = useState<any | null>(null);
@@ -133,9 +134,9 @@ export default function App() {
     setIsScanning(true);
     setRecentReport(null);
     setScanningLogs([]);
-    addLog(`Escaneando carpeta de origen: ${downloadsPath}`, "info");
+    addLog(`Escaneando carpeta de origen: ${downloadsPath} (Subcarpetas: ${recursiveScan ? 'SÍ' : 'NO'})`, "info");
     try {
-      const res = await fetch("/api/organize/scan");
+      const res = await fetch(`/api/organize/scan?recursive=${recursiveScan}`);
       if (!res.body) {
         throw new Error("El servidor no soporta la transmisión de progreso de escaneo.");
       }
@@ -312,6 +313,20 @@ export default function App() {
       [field]: value,
       status: "matched" as const // mark as matched/ready
     } : m));
+  };
+
+  const updateCustomDestFolder = (id: string, folder: string) => {
+    setMovies(prev => prev.map(m => m.id === id ? {
+      ...m,
+      customDestFolder: folder
+    } : m));
+  };
+
+  const getFirstLetterFolder = (title: string) => {
+    if (!title) return "";
+    const cleanTitle = title.replace(/[\\/:*?"<>|]/g, "").trim();
+    const firstLetter = cleanTitle.charAt(0).toUpperCase();
+    return /^[A-Z]$/.test(firstLetter) ? firstLetter : "#";
   };
 
   // Selection handlers
@@ -643,15 +658,27 @@ export default function App() {
                       </p>
                     </div>
 
-                    <button
-                      onClick={scanDownloads}
-                      disabled={isScanning || isMatching || isProcessing}
-                      id="btn-scan-folder"
-                      className="w-full sm:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded-lg shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer hover:shadow-orange-600/10"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 text-white ${isScanning ? "animate-spin" : ""}`} />
-                      Escanear Carpeta de Origen
-                    </button>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+                      <label className="flex items-center gap-2 cursor-pointer select-none py-2 px-3 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={recursiveScan}
+                          onChange={(e) => setRecursiveScan(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-900 text-orange-500 focus:ring-orange-500 h-4 w-4 cursor-pointer"
+                        />
+                        <span className="text-xs font-semibold text-slate-300">Escanear subcarpetas</span>
+                      </label>
+
+                      <button
+                        onClick={scanDownloads}
+                        disabled={isScanning || isMatching || isProcessing}
+                        id="btn-scan-folder"
+                        className="px-5 py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded-lg shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer hover:shadow-orange-600/10 shrink-0"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 text-white ${isScanning ? "animate-spin" : ""}`} />
+                        Escanear Carpeta de Origen
+                      </button>
+                    </div>
                   </div>
 
                   {/* Scanning Progress Console Overlay */}
@@ -779,11 +806,35 @@ export default function App() {
 
                                   {/* Filename & Source Details */}
                                   <td className="px-5 py-4">
-                                    <div className="max-w-xs sm:max-w-md">
+                                    <div className="max-w-xs sm:max-w-md space-y-2">
                                       <span className="font-semibold text-slate-100 block truncate" title={movie.fileName}>
                                         {movie.fileName}
                                       </span>
-                                      <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
+                                      
+                                      {/* Original path (current location) */}
+                                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400" title={movie.originalPath}>
+                                        <FolderOpen className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                        <span className="font-semibold shrink-0">Origen:</span>
+                                        <span className="truncate bg-slate-900/60 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300 max-w-[280px]">
+                                          {movie.originalPath}
+                                        </span>
+                                      </div>
+
+                                      {/* Target path (destination folder) */}
+                                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                        <Folder className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                                        <span className="font-semibold shrink-0">Destino:</span>
+                                        <input
+                                          type="text"
+                                          value={movie.customDestFolder !== undefined ? movie.customDestFolder : (organizeType === "alphabetical" && movie.matchedTitle ? `${organizedPath}/${getFirstLetterFolder(movie.matchedTitle)}` : organizedPath)}
+                                          onChange={(e) => updateCustomDestFolder(movie.id, e.target.value)}
+                                          className="px-2 py-0.5 border border-slate-800 rounded text-[10px] bg-slate-950 text-slate-300 focus:ring-1 focus:ring-orange-500 focus:border-orange-500 focus:outline-none flex-1 max-w-[280px] font-mono h-5.5"
+                                          title="Modificar carpeta de destino para esta película"
+                                          placeholder="Carpeta de destino"
+                                        />
+                                      </div>
+
+                                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
                                         <span className="bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded border border-slate-700">
                                           {movie.extension.toUpperCase()}
                                         </span>

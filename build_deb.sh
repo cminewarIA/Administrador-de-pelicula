@@ -183,7 +183,7 @@ try:
             gi.require_version('WebKit2', '4.0')
         except (ValueError, AttributeError):
             pass
-    from gi.repository import Gtk, WebKit2, Gdk
+    from gi.repository import Gtk, WebKit2, Gdk, GLib
 except Exception as e:
     print(f"Error cargando dependencias de interfaz nativa GTK/WebKit: {e}", file=sys.stderr)
     print("Por favor, asegúrate de instalar python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0 o gir1.2-webkit2-4.1", file=sys.stderr)
@@ -232,6 +232,11 @@ class MovieOrganizerApp(Gtk.Window):
         self.show_all()
 
 if __name__ == "__main__":
+    try:
+        GLib.set_prgname('cineorganize-ai')
+        GLib.set_application_name('CineOrganize AI')
+    except Exception:
+        pass
     app = MovieOrganizerApp()
     Gtk.main()
 EOF
@@ -256,21 +261,6 @@ WantedBy=multi-user.target
 EOF
 
 echo "=== 7. Creating Desktop Entry and Icon ==="
-# Desktop Entry to appear in Ubuntu applications launcher menu (for movie-organizer)
-cat << 'EOF' > "$BUILD_DIR/usr/share/applications/movie-organizer.desktop"
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=CineOrganize AI
-Comment=Estandariza tus películas usando metadatos inteligentes de Emby, TMDb, Trakt y Gemini
-Exec=/usr/bin/cineorganize-ai
-Icon=cineorganize-ai
-Terminal=false
-Categories=Utility;FileTools;Database;
-Keywords=movie;organizer;emby;gemini;tmdb;trakt;cine;
-StartupNotify=true
-EOF
-
 # Desktop Entry to appear in Ubuntu applications launcher menu (for cineorganize-ai)
 cat << 'EOF' > "$BUILD_DIR/usr/share/applications/cineorganize-ai.desktop"
 [Desktop Entry]

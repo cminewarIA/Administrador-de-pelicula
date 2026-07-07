@@ -33,6 +33,7 @@ export interface MovieFile {
   sourceUsed?: string;
   status?: "idle" | "matching" | "matched" | "error";
   error?: string;
+  customDestFolder?: string;
 }
 
 export interface LogEntry {

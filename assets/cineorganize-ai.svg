@@ -1,131 +1,161 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Definition of gradients and filters -->
   <defs>
-    <!-- Background Gradient -->
-    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#111827" />
-      <stop offset="50%" stop-color="#1f2937" />
-      <stop offset="100%" stop-color="#030712" />
+    <!-- Radial splatter gradient -->
+    <radialGradient id="splatter-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffedd5" stop-opacity="1" />
+      <stop offset="60%" stop-color="#fed7aa" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#ffedd5" stop-opacity="0" />
+    </radialGradient>
+    
+    <!-- Dragon body gradient -->
+    <linearGradient id="dragon-body-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#990000" />
+      <stop offset="50%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#ef4444" />
     </linearGradient>
     
-    <!-- Neon Accent Gradients -->
-    <linearGradient id="neon-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#22d3ee" />
-      <stop offset="100%" stop-color="#06b6d4" />
-    </linearGradient>
-    
-    <linearGradient id="neon-violet" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a855f7" />
-      <stop offset="100%" stop-color="#6366f1" />
+    <!-- Flame gradient -->
+    <linearGradient id="flame-grad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ea580c" />
+      <stop offset="100%" stop-color="#f97316" stop-opacity="0.8" />
     </linearGradient>
 
-    <linearGradient id="neon-rose" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f43f5e" />
-      <stop offset="100%" stop-color="#be123c" />
-    </linearGradient>
-    
-    <!-- Metallic Gradient -->
-    <linearGradient id="metal-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f8fafc" />
-      <stop offset="50%" stop-color="#cbd5e1" />
-      <stop offset="100%" stop-color="#64748b" />
-    </linearGradient>
-
-    <linearGradient id="border-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#22d3ee" />
-      <stop offset="50%" stop-color="#a855f7" />
-      <stop offset="100%" stop-color="#f43f5e" />
-    </linearGradient>
-
-    <!-- Filters for Glow effects -->
-    <filter id="neon-glow-filter" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="12" result="blur1" />
-      <feGaussianBlur stdDeviation="4" result="blur2" />
-      <feMerge>
-        <feMergeNode in="blur1" />
-        <feMergeNode in="blur2" />
-        <feMergeNode in="SourceGraphic" />
-      </feMerge>
-    </filter>
-
-    <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.6"/>
+    <!-- Drop Shadow for gothic letter and dragon to lift them from background -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
     </filter>
   </defs>
 
-  <!-- Squircle Base (Premium Dark Glassmorphism) -->
-  <rect x="24" y="24" width="464" height="464" rx="110" fill="url(#bg-grad)" stroke="url(#border-grad)" stroke-width="6" filter="url(#soft-shadow)" />
-
-  <!-- Outer Film Strip Frame (Subtle Background Detail) -->
-  <g opacity="0.12" stroke="#ffffff" stroke-width="4" fill="none">
-    <rect x="70" y="70" width="372" height="372" rx="30" />
-    <!-- Film sprocket holes -->
-    <rect x="85" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="135" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="185" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="235" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="285" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="335" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="385" y="85" width="20" height="15" rx="3" fill="#ffffff" />
-    <!-- Bottom holes -->
-    <rect x="85" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="135" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="185" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="235" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="285" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="335" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-    <rect x="385" y="412" width="20" height="15" rx="3" fill="#ffffff" />
-  </g>
-
-  <!-- Glowing Cinematic Circle Reel Backing -->
-  <circle cx="256" cy="256" r="150" fill="none" stroke="url(#border-grad)" stroke-width="2" opacity="0.3" filter="url(#neon-glow-filter)" />
-
-  <!-- The Clapperboard/Cine Symbol (representing Cinema/Organizer) -->
-  <g transform="translate(146, 120)" filter="url(#soft-shadow)">
-    <!-- Main Clapper Body -->
-    <path d="M 10 70 L 210 70 L 210 240 C 210 250, 200 260, 190 260 L 30 260 C 20 260, 10 250, 10 240 Z" fill="#1e293b" stroke="url(#metal-grad)" stroke-width="4" />
+  <!-- BACKGROUND: Artistic Splatters and Mist (mimicking the original orange splatter background) -->
+  <g id="splatters" opacity="0.85">
+    <!-- Center big glow -->
+    <circle cx="256" cy="256" r="210" fill="url(#splatter-grad)" opacity="0.9" />
     
-    <!-- Clapper Top Bar (Angled Opened Clapper) -->
-    <g transform="rotate(-15, 10, 70)">
-      <path d="M 10 30 L 210 30 L 210 65 L 10 65 Z" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="4" />
-      <!-- White Stripes on Top Bar -->
-      <path d="M 35 30 L 55 30 L 35 65 L 15 65 Z" fill="#f8fafc" />
-      <path d="M 85 30 L 105 30 L 85 65 L 65 65 Z" fill="#f8fafc" />
-      <path d="M 135 30 L 155 30 L 135 65 L 115 65 Z" fill="#f8fafc" />
-      <path d="M 185 30 L 205 30 L 185 65 L 165 65 Z" fill="#f8fafc" />
-    </g>
-
-    <!-- Clapper Base Stripes (Closed reference) -->
-    <path d="M 10 70 L 210 70 L 210 95 L 10 95 Z" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="2" />
-    <path d="M 45 70 L 65 70 L 45 95 L 25 95 Z" fill="#f8fafc" opacity="0.8" />
-    <path d="M 95 70 L 115 70 L 95 95 L 75 95 Z" fill="#f8fafc" opacity="0.8" />
-    <path d="M 145 70 L 165 70 L 145 95 L 125 95 Z" fill="#f8fafc" opacity="0.8" />
-    <path d="M 195 70 L 210 70 L 210 95 L 195 95 Z" fill="#f8fafc" opacity="0.8" />
-
-    <!-- Clapperboard Board Text Lines (Representing Organized Data/List) -->
-    <rect x="35" y="125" width="100" height="8" rx="4" fill="url(#neon-cyan)" opacity="0.75" />
-    <rect x="35" y="145" width="150" height="8" rx="4" fill="url(#metal-grad)" opacity="0.5" />
-    <rect x="35" y="165" width="120" height="8" rx="4" fill="url(#metal-grad)" opacity="0.5" />
-    <rect x="35" y="185" width="70" height="8" rx="4" fill="url(#neon-violet)" opacity="0.75" />
+    <!-- Fine splattered droplets around -->
+    <circle cx="150" cy="120" r="14" fill="#ff7e40" opacity="0.6" />
+    <circle cx="130" cy="150" r="8" fill="#ff9f40" opacity="0.5" />
+    <circle cx="170" cy="90" r="6" fill="#ff5d40" opacity="0.7" />
+    <circle cx="360" cy="140" r="18" fill="#ff7e40" opacity="0.55" />
+    <circle cx="380" cy="110" r="10" fill="#ff9f40" opacity="0.45" />
+    <circle cx="340" cy="180" r="12" fill="#ff5d40" opacity="0.6" />
+    <circle cx="120" cy="360" r="22" fill="#ff7e40" opacity="0.5" />
+    <circle cx="90" cy="330" r="14" fill="#ff9f40" opacity="0.6" />
+    <circle cx="140" cy="400" r="10" fill="#ff5d40" opacity="0.5" />
+    <circle cx="380" cy="360" r="20" fill="#ff7e40" opacity="0.6" />
+    <circle cx="410" cy="330" r="8" fill="#ff9f40" opacity="0.4" />
+    <circle cx="350" cy="400" r="12" fill="#ff5d40" opacity="0.5" />
     
-    <!-- Camera Lens / Film Reel Detail on Clapperboard -->
-    <circle cx="160" cy="180" r="24" fill="#0f172a" stroke="url(#neon-violet)" stroke-width="3" />
-    <circle cx="160" cy="180" r="12" fill="#1e1b4b" stroke="url(#neon-cyan)" stroke-width="2" />
-    <circle cx="155" cy="175" r="4" fill="#ffffff" opacity="0.6" />
+    <!-- Extra scattered paint drops -->
+    <circle cx="210" cy="80" r="5" fill="#ff7e40" opacity="0.7" />
+    <circle cx="280" cy="70" r="7" fill="#ff5d40" opacity="0.8" />
+    <circle cx="420" cy="220" r="6" fill="#ff9f40" opacity="0.5" />
+    <circle cx="80" cy="240" r="8" fill="#ff7e40" opacity="0.6" />
+    <circle cx="290" cy="440" r="9" fill="#ff5d40" opacity="0.7" />
+    <circle cx="180" cy="430" r="5" fill="#ff9f40" opacity="0.6" />
+    
+    <!-- Micro-splatters -->
+    <circle cx="230" cy="110" r="3" fill="#ff5d40" />
+    <circle cx="110" cy="190" r="4" fill="#ff7e40" />
+    <circle cx="180" cy="160" r="3" fill="#ff9f40" />
+    <circle cx="400" cy="280" r="3.5" fill="#ff5d40" />
+    <circle cx="320" cy="300" r="4" fill="#ff7e40" />
+    <circle cx="220" cy="390" r="3" fill="#ff9f40" />
+    <circle cx="260" cy="100" r="2" fill="#ff5d40" />
+    <circle cx="160" cy="300" r="2.5" fill="#ff7e40" />
   </g>
 
-  <!-- Big Glowing AI Sparkle / Magic Wand Star (representing 'AI' Intelligence) -->
-  <g transform="translate(330, 240)" filter="url(#neon-glow-filter)">
-    <!-- Glowing Core Star -->
-    <path d="M 40 0 L 52 28 L 80 40 L 52 52 L 40 80 L 28 52 L 0 40 L 28 28 Z" fill="url(#border-grad)" />
-    <!-- Secondary tiny star -->
-    <path d="M 15 -20 L 19 -9 L 30 -5 L 19 -1 L 15 10 L 11 -1 L 0 -5 L 11 -9 Z" fill="#ffffff" opacity="0.9" />
-  </g>
+  <!-- FOREGROUND: Gothic Character & Dragon Group -->
+  <g filter="url(#shadow)">
+    <!-- 1. THE BLACK GOTHIC CALLIGRAPHIC SYMBOL (Letter "O" or "G" style) -->
+    <!-- Large, stylized gothic-inspired background letter in pitch black -->
+    <path d="M 230 130 
+             C 170 130, 150 170, 150 256 
+             C 150 342, 170 382, 230 382 
+             C 270 382, 300 360, 315 320 
+             L 345 330 
+             C 325 385, 285 412, 230 412 
+             C 140 412, 110 350, 110 256 
+             C 110 162, 140 100, 230 100 
+             C 285 100, 325 125, 345 180 
+             L 315 190 
+             C 300 150, 270 130, 230 130 Z" 
+          fill="#0a0a0a" />
+          
+    <!-- Decorative vertical gothic bar slash in the center -->
+    <path d="M 215 140 L 245 140 L 245 372 L 215 372 Z" fill="#0a0a0a" />
+    <path d="M 180 200 L 280 200 L 265 220 L 195 220 Z" fill="#0a0a0a" />
+    <path d="M 180 300 L 280 300 L 265 320 L 195 320 Z" fill="#0a0a0a" />
 
-  <!-- Small AI Sparkle Star -->
-  <g transform="translate(100, 280)" filter="url(#neon-glow-filter)">
-    <path d="M 20 0 L 26 14 L 40 20 L 26 26 L 20 40 L 14 26 L 0 20 L 14 14 Z" fill="url(#neon-cyan)" />
-  </g>
+    <!-- 2. THE MAJESTIC RED DRAGON (Intertwined with the Gothic letter) -->
+    <!-- Dragon tail, coiling around the bottom -->
+    <path d="M 320 330 
+             C 340 370, 310 420, 260 420 
+             C 220 420, 200 390, 230 370 
+             C 250 350, 280 380, 280 395 
+             C 280 405, 255 410, 255 400 
+             C 255 390, 285 360, 310 340 Z" 
+          fill="url(#dragon-body-grad)" />
+          
+    <!-- Dragon tail tip tuft / fire -->
+    <path d="M 330 310 C 350 325, 360 305, 370 320 C 360 335, 340 335, 330 310 Z" fill="#ea580c" />
 
-  <!-- Modern Abstract "C" and "A" Interlocking Glow Line -->
-  <path d="M 220 380 C 180 380, 160 350, 160 310 C 160 270, 190 250, 220 250" fill="none" stroke="url(#neon-cyan)" stroke-width="8" stroke-linecap="round" opacity="0.4" filter="url(#neon-glow-filter)" />
+    <!-- Main serpentine body coiling up from bottom right to top left -->
+    <path d="M 300 350 
+             C 360 290, 380 220, 310 180 
+             C 260 150, 230 220, 200 240 
+             C 170 260, 140 210, 160 170 
+             C 170 150, 195 160, 205 180 
+             C 190 200, 175 225, 200 225 
+             C 230 225, 250 140, 305 150 
+             C 360 160, 400 260, 315 330 Z" 
+          fill="url(#dragon-body-grad)" />
+
+    <!-- Spikes along the back of the dragon -->
+    <path d="M 325 152 L 332 142 L 333 155 L 345 147 L 343 160 L 357 155 L 352 168 L 366 168 L 358 181" fill="#7f1d1d" />
+    <path d="M 345 280 L 360 282 L 350 292 L 365 298 L 352 305 L 364 315 L 350 320" fill="#7f1d1d" />
+    <path d="M 185 160 L 180 148 L 192 155 L 192 143 L 201 153" fill="#7f1d1d" />
+
+    <!-- Dragon claws/legs grasping the gothic letter -->
+    <!-- Top-left claw -->
+    <path d="M 175 195 C 160 195, 150 185, 145 190 C 148 180, 158 178, 165 182 L 175 185 Z" fill="url(#dragon-body-grad)" />
+    <!-- Bottom-right claw grasping -->
+    <path d="M 320 230 C 340 235, 345 245, 350 240 C 342 248, 330 245, 322 240 Z" fill="url(#dragon-body-grad)" />
+
+    <!-- Dragon head (facing right, mouth open breathing fire) -->
+    <!-- Head base and horns -->
+    <path d="M 280 145 
+             C 270 130, 250 115, 240 110 
+             C 245 120, 255 125, 260 135 
+             C 240 135, 230 145, 220 150 
+             C 230 150, 240 155, 250 155 
+             C 245 165, 240 175, 245 180 
+             C 255 180, 265 170, 275 160 Z" 
+          fill="url(#dragon-body-grad)" />
+          
+    <!-- Sharp horn details -->
+    <path d="M 240 110 L 210 95 L 225 112 L 205 105 L 230 118 Z" fill="#7f1d1d" />
+    <!-- Snout and open jaw -->
+    <path d="M 275 160 L 295 165 L 290 172 L 275 170 L 285 180 L 265 175 Z" fill="url(#dragon-body-grad)" />
+    
+    <!-- White sharp teeth -->
+    <polygon points="278,161 281,165 284,162" fill="#ffffff" />
+    <polygon points="284,162 287,166 290,163" fill="#ffffff" />
+    <polygon points="276,171 279,167 282,170" fill="#ffffff" />
+    
+    <!-- Glowing yellow eye -->
+    <circle cx="262" cy="145" r="3.5" fill="#facc15" />
+    <circle cx="263" cy="144" r="1" fill="#ffffff" />
+    
+    <!-- Whisker/barbel waving back -->
+    <path d="M 270 155 Q 290 145, 310 150" fill="none" stroke="#ef4444" stroke-width="2" />
+
+    <!-- Fire and Mystical Smoke/Mist breathed from the mouth -->
+    <path d="M 292 166 
+             C 320 160, 340 140, 360 145 
+             C 350 155, 330 165, 310 170 
+             C 330 175, 350 185, 340 195 
+             C 320 185, 305 175, 288 171 Z" 
+          fill="url(#flame-grad)" />
+  </g>
 </svg>
