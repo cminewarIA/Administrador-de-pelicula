@@ -20,8 +20,68 @@ app.use(express.json());
 // Default folders
 let downloadsFolder = "/tmp/movie_organizer/downloads";
 let organizedFolder = "/tmp/movie_organizer/organized";
-const reportsFolder = "/tmp/movie_organizer/reports";
+const reportsFolder = path.join(process.cwd(), "reports-persist");
 let customGeminiApiKey = "";
+
+const configFilePath = path.join(process.cwd(), "config-persist.json");
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(configFilePath)) {
+      const data = JSON.parse(fs.readFileSync(configFilePath, "utf-8"));
+      if (data.downloadsFolder) downloadsFolder = data.downloadsFolder;
+      if (data.organizedFolder) organizedFolder = data.organizedFolder;
+      if (data.customGeminiApiKey) customGeminiApiKey = data.customGeminiApiKey;
+      console.log("Configuración cargada de forma persistente:", data);
+    }
+  } catch (e) {
+    console.error("Error al cargar la configuración persistente:", e);
+  }
+}
+
+function saveConfig() {
+  try {
+    fs.mkdirSync(path.dirname(configFilePath), { recursive: true });
+    fs.writeFileSync(configFilePath, JSON.stringify({
+      downloadsFolder,
+      organizedFolder,
+      customGeminiApiKey
+    }, null, 2));
+    console.log("Configuración guardada de forma persistente.");
+  } catch (e) {
+    console.error("Error al guardar la configuración persistente:", e);
+  }
+}
+
+function saveErrorReport(type: "Escaneo" | "Emparejamiento" | "Procesamiento" | "General", errorMsg: string, details?: any) {
+  try {
+    const reportId = `error_${Date.now()}`;
+    const report = {
+      id: reportId,
+      timestamp: new Date().toISOString(),
+      totalProcessed: 0,
+      successCount: 0,
+      errorCount: 1,
+      organizeType: "N/A",
+      logs: [
+        {
+          file: type,
+          status: "ERROR",
+          message: `Error ocurrido en ${type}: ${errorMsg}`,
+          details: details || {}
+        }
+      ]
+    };
+    fs.mkdirSync(reportsFolder, { recursive: true });
+    fs.writeFileSync(path.join(reportsFolder, `${reportId}.json`), JSON.stringify(report, null, 2));
+    console.log(`Reporte de error guardado: ${reportId}`);
+  } catch (e) {
+    console.error("Error al guardar el reporte de error:", e);
+  }
+}
+
+// Cargar la configuración guardada al arrancar
+loadConfig();
 
 // Local lookup database for fallback matches when Gemini API Key is missing or for seed validation
 const LOCAL_MOVIE_DB: Record<string, { title: string; year: number; imdbId: string; synopsis: string; posterUrl: string; rating: number; sourceUsed: string; reasoning: string }> = {
@@ -102,55 +162,6 @@ function seedWorkspace() {
   fs.mkdirSync(downloadsFolder, { recursive: true });
   fs.mkdirSync(organizedFolder, { recursive: true });
   fs.mkdirSync(reportsFolder, { recursive: true });
-
-  const samples = [
-    {
-      folder: "Inception.2010.1080p",
-      filename: "Inception.2010.1080p.BluRay.mp4",
-      nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>Inception</title>\n  <year>2010</year>\n  <uniqueid type="imdb">tt1375666</uniqueid>\n</movie>`
-    },
-    {
-      folder: "Interstellar.2014.Bluray",
-      filename: "Interstellar_2014_FullMovie.mkv",
-      nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>Interstellar</title>\n  <year>2014</year>\n</movie>` // Missing IMDb ID!
-    },
-    {
-      folder: "", // Root file, no subfolder
-      filename: "El.Padrino.1972.Spanish.Bluray.mp4",
-      nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>El Padrino</title>\n  <year>1972</year>\n</movie>` // Spanish title, missing IMDb ID!
-    },
-    {
-      folder: "Sci-Fi/Avatar.The.Way.Of.Water.2022.WEB-DL",
-      filename: "avatar.the.way.of.water.2022.1080p.mkv",
-      nfo: null // No NFO file! Completely raw download
-    },
-    {
-      folder: "Anime/Spirited Away (2001)",
-      filename: "spirited.away.anime.avi",
-      nfo: `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>Spirited Away</title>\n  <year>2001</year>\n  <uniqueid type="imdb">tt0245429</uniqueid>\n</movie>`
-    }
-  ];
-
-  for (const sample of samples) {
-    let targetDir = downloadsFolder;
-    if (sample.folder) {
-      targetDir = path.join(downloadsFolder, sample.folder);
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    const moviePath = path.join(targetDir, sample.filename);
-    if (!fs.existsSync(moviePath)) {
-      fs.writeFileSync(moviePath, Buffer.alloc(100 * 1024)); // 100 KB empty space
-    }
-
-    if (sample.nfo) {
-      const nfoFilename = sample.filename.replace(/\.[^/.]+$/, "") + ".nfo";
-      const nfoPath = path.join(targetDir, nfoFilename);
-      if (!fs.existsSync(nfoPath)) {
-        fs.writeFileSync(nfoPath, sample.nfo);
-      }
-    }
-  }
 }
 
 // Call seed workspace on server boot
@@ -1132,6 +1143,10 @@ app.post("/api/workspace/config", (req, res) => {
   if (geminiApiKey !== undefined) {
     customGeminiApiKey = geminiApiKey;
   }
+  
+  // Guardar de forma persistente
+  saveConfig();
+
   res.json({ 
     success: true, 
     downloadsFolder, 
@@ -1177,6 +1192,9 @@ app.get("/api/organize/scan", async (req, res) => {
         }) + "\n");
       });
     } catch (scanErr: any) {
+      // Registrar error de escaneo en los reportes históricos
+      saveErrorReport("Escaneo", scanErr.message, { downloadsFolder });
+
       // Offline remote simulation sandbox fallback
       res.write(JSON.stringify({
         type: "log",
@@ -1198,6 +1216,7 @@ app.get("/api/organize/scan", async (req, res) => {
     res.write(JSON.stringify({ type: "done", movies }) + "\n");
     res.end();
   } catch (err: any) {
+    saveErrorReport("Escaneo", err.message, { downloadsFolder });
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     } else {
@@ -1221,25 +1240,27 @@ app.post("/api/organize/match", async (req, res) => {
     const matched = await matchMovieWithGemini(fileName, nfoData);
     res.json(matched);
   } catch (error: any) {
+    saveErrorReport("Emparejamiento", `Fallo al emparejar "${fileName}": ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
 
 // 6. Execute organization (Rename & Move)
 app.post("/api/organize/process", async (req, res) => {
-  const { items, organizeType, cleanFolders, processSubtitles } = req.body;
-  // organizeType: 'flat' | 'alphabetical'
-  // cleanFolders: boolean
-  // processSubtitles: boolean
+  try {
+    const { items, organizeType, cleanFolders, processSubtitles } = req.body;
+    // organizeType: 'flat' | 'alphabetical'
+    // cleanFolders: boolean
+    // processSubtitles: boolean
 
-  if (!items || !Array.isArray(items)) {
-    return res.status(400).json({ error: "No items to process" });
-  }
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ error: "No items to process" });
+    }
 
-  const reportId = `report_${Date.now()}`;
-  const logs: any[] = [];
-  let successCount = 0;
-  let errorCount = 0;
+    const reportId = `report_${Date.now()}`;
+    const logs: any[] = [];
+    let successCount = 0;
+    let errorCount = 0;
 
   for (const item of items) {
     const { originalPath, matchedTitle, matchedYear, matchedImdbId, extension, customDestFolder } = item;
@@ -1487,6 +1508,10 @@ app.post("/api/organize/process", async (req, res) => {
   fs.writeFileSync(path.join(reportsFolder, `${reportId}.json`), JSON.stringify(report, null, 2));
 
   res.json({ success: true, report });
+  } catch (err: any) {
+    saveErrorReport("Procesamiento", `Error crítico en el proceso: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 7. Get reports list

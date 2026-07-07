@@ -30,9 +30,9 @@ export default function App() {
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
   
   // Folders state
-  const [downloadsPath, setDownloadsPath] = useState("");
-  const [organizedPath, setOrganizedPath] = useState("");
-  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [downloadsPath, setDownloadsPath] = useState(() => localStorage.getItem("downloadsPath") || "");
+  const [organizedPath, setOrganizedPath] = useState(() => localStorage.getItem("organizedPath") || "");
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("geminiApiKey") || "");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configMessage, setConfigMessage] = useState("");
 
@@ -64,20 +64,41 @@ export default function App() {
   };
 
   // Fetch workspace status
-  const fetchWorkspaceStatus = async () => {
+  const fetchWorkspaceStatus = async (syncLocal = false) => {
     try {
       const res = await fetch("/api/workspace");
       const data: WorkspaceStatus = await res.json();
       setStatus(data);
-      if (!downloadsPath) setDownloadsPath(data.downloadsFolder);
-      if (!organizedPath) setOrganizedPath(data.organizedFolder);
+
+      const savedDownloads = localStorage.getItem("downloadsPath") || "";
+      const savedOrganized = localStorage.getItem("organizedPath") || "";
+
+      // Prioritize local state, then localStorage, then server config
+      const finalDownloads = downloadsPath || savedDownloads || data.downloadsFolder;
+      const finalOrganized = organizedPath || savedOrganized || data.organizedFolder;
+
+      setDownloadsPath(finalDownloads);
+      setOrganizedPath(finalOrganized);
+
+      if (finalDownloads) localStorage.setItem("downloadsPath", finalDownloads);
+      if (finalOrganized) localStorage.setItem("organizedPath", finalOrganized);
+
+      // Auto-sync browser-saved folders with server if server has different defaults
+      if (syncLocal && (finalDownloads !== data.downloadsFolder || finalOrganized !== data.organizedFolder)) {
+        addLog(`Sincronizando rutas persistidas con el servidor: ${finalDownloads} -> ${finalOrganized}`, "info");
+        await fetch("/api/workspace/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ downloads: finalDownloads, organized: finalOrganized, geminiApiKey: geminiApiKey || undefined })
+        });
+      }
     } catch (e) {
       console.error("Error fetching workspace status:", e);
     }
   };
 
   useEffect(() => {
-    fetchWorkspaceStatus();
+    fetchWorkspaceStatus(true);
   }, []);
 
   // Save paths configuration
@@ -95,6 +116,16 @@ export default function App() {
       if (data.success) {
         setConfigMessage("¡Rutas actualizadas con éxito!");
         addLog(`Configuración de directorios guardada con éxito.`, "success");
+        
+        // Persistir localmente en el navegador
+        localStorage.setItem("downloadsPath", downloadsPath);
+        localStorage.setItem("organizedPath", organizedPath);
+        if (geminiApiKey) {
+          localStorage.setItem("geminiApiKey", geminiApiKey);
+        } else {
+          localStorage.removeItem("geminiApiKey");
+        }
+
         fetchWorkspaceStatus();
         setTimeout(() => setConfigMessage(""), 3000);
       }
