@@ -254,6 +254,7 @@ User=root
 WorkingDirectory=/usr/share/movie-organizer
 ExecStart=/usr/bin/movie-organizer
 Restart=on-failure
+Environment=NODE_ENV=production
 Environment=PORT=3000
 
 [Install]

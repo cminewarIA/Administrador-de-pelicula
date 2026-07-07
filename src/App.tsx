@@ -168,6 +168,15 @@ export default function App() {
     addLog(`Escaneando carpeta de origen: ${downloadsPath} (Subcarpetas: ${recursiveScan ? 'SÍ' : 'NO'})`, "info");
     try {
       const res = await fetch(`/api/organize/scan?recursive=${recursiveScan}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        let errMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.error || parsed.message || errText;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
       if (!res.body) {
         throw new Error("El servidor no soporta la transmisión de progreso de escaneo.");
       }
@@ -254,6 +263,16 @@ export default function App() {
           })
         });
 
+        if (!res.ok) {
+          const errText = await res.text();
+          let errMsg = errText;
+          try {
+            const parsed = JSON.parse(errText);
+            errMsg = parsed.error || parsed.message || errText;
+          } catch (_) {}
+          throw new Error(errMsg);
+        }
+
         const matchResult = await res.json();
         
         setMovies(prev => prev.map(m => m.id === currentItem.id ? {
@@ -308,6 +327,16 @@ export default function App() {
           embyImdb: item.embyImdb
         })
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        let errMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.error || parsed.message || errText;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
 
       const matchResult = await res.json();
       
@@ -403,6 +432,16 @@ export default function App() {
           processSubtitles
         })
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        let errMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.error || parsed.message || errText;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
 
       const data = await res.json();
       if (data.success) {

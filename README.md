@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# CineOrganize AI (Movie Organizer)
 
-# Run and deploy your AI Studio app
+CineOrganize AI es un organizador inteligente y estandarizador de películas diseñado para integrarse con Emby, servidores NAS (vía SMB/FTP) y Gemini AI para obtener la máxima precisión y enriquecimiento de metadatos de películas de TMDb y Trakt.tv.
 
-This contains everything you need to run your app locally.
+## Características
 
-View your app in AI Studio: https://ai.studio/apps/7a3738b8-2cc8-40de-954f-ba3742537dbe
+- 🎥 **Estandarización Inteligente**: Renombra archivos de películas usando el formato estándar de Emby: `Título de la Película (Año) [imdbid-ttXXXXXXX]`.
+- 🧠 **Potenciado por Gemini 2.0 Flash**: Analiza nombres complejos de archivos (con etiquetas de release, formato, resolución, etc.), lee metadatos locales de NFO y busca en TMDb/Trakt.tv en tiempo real usando el motor de búsqueda integrado de Gemini.
+- 📁 **Soporte de Almacenamiento Remoto**: Escanea y organiza directorios en local o remotamente mediante protocolos **SMB (Samba)** y **FTP**.
+- 📊 **Historial de Informes**: Registra escaneos exitosos y errores en formato JSON persistente.
+- 📦 **Empaquetado en .deb**: Incluye script para generar un paquete Debian instalable nativamente en Ubuntu/Debian con una interfaz gráfica basada en PyGObject/WebKit.
 
-## Run Locally
+## Requisitos de Entorno
 
-**Prerequisites:**  Node.js
+Para que CineOrganize AI funcione al 100%, debes configurar las siguientes variables de entorno:
 
+- `GEMINI_API_KEY`: Tu clave de API de Google AI Studio (requerida para habilitar la consulta inteligente y enriquecimiento de metadatos en TMDb y Trakt.tv).
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Configuración y Conexiones
+
+### Rutas Locales
+- Formato: `/ruta/absoluta/a/tus/descargas`
+- Ejemplo de simulación predeterminada: `/tmp/movie_organizer/downloads`
+
+### Rutas SMB (Samba/NAS)
+- Formato: `smb://usuario:contraseña@host:puerto/recurso/subcarpeta`
+- Ejemplo: `smb://admin:secreto@192.168.1.100/video/torrent/descargas`
+
+### Rutas FTP
+- Formato: `ftp://usuario:contraseña@host:puerto/subcarpeta`
+- Ejemplo: `ftp://user:pass@ftp.miservidor.com/movies`
+
+## Compilación e Instalación (.deb)
+
+Puedes generar el paquete de instalación Debian utilizando el script avanzado `build_deb.sh`:
+
+1. Dale permisos de ejecución al script:
+   ```bash
+   chmod +x build_deb.sh
+   ```
+
+2. Compila el paquete especificando una versión opcional (ej. `1.2.0`):
+   ```bash
+   ./build_deb.sh 1.2.0
+   ```
+
+3. Instala el archivo `.deb` resultante:
+   ```bash
+   sudo dpkg -i movie-organizer_1.2.0_all.deb
+   # Si faltan dependencias, corrígelas con:
+   sudo apt-get install -f
+   ```
+
+El instalador configurará automáticamente:
+- El lanzador del menú de aplicaciones (`CineOrganize AI`)
+- Un servicio de systemd ejecutándose en producción en el puerto `3000` con `NODE_ENV=production`.
+- Un wrapper nativo de GTK3/WebKit para una experiencia de escritorio fluida.
+
+---
+Creado con ❤️ para amantes del cine y organizadores de NAS de alta precisión.

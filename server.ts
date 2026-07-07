@@ -230,7 +230,9 @@ function seedWorkspace() {
 }
 
 // Call seed workspace on server boot
-seedWorkspace();
+if (process.env.NODE_ENV !== "production") {
+  seedWorkspace();
+}
 
 // Match movie with Gemini AI SDK
 async function matchMovieWithGemini(fileName: string, nfoData: any): Promise<any> {
@@ -271,7 +273,7 @@ DIRECTIONS:
 Return the final combined metadata in Spanish (especially the synopsis) as a JSON object matching the requested schema.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.0-flash",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -356,17 +358,10 @@ function fallbackMatch(fileName: string, nfoData: any) {
   
   cleanTitle = cleanTitle.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
   
-  // Generate a plausible IMDb ID based on name hash for fallback demo purposes
-  let hash = 0;
-  for (let i = 0; i < cleanTitle.length; i++) {
-    hash = cleanTitle.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const idNum = Math.abs(hash % 9000000) + 1000000;
-
   return {
     title: cleanTitle || "Película Desconocida",
     year: year,
-    imdbId: `tt${idNum}`,
+    imdbId: (nfoData && nfoData.imdbId) ? nfoData.imdbId : "",
     synopsis: "No se encontró sinopsis local para esta película. Puedes activar Gemini AI configurando la API Key en Settings para que busque automáticamente en TMDb y Trakt.tv.",
     posterUrl: "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=400&q=80",
     rating: 6.0,
@@ -1291,15 +1286,22 @@ app.get("/api/organize/scan", async (req, res) => {
         }) + "\n");
       });
     } catch (scanErr: any) {
+      let message = scanErr.message;
+      if (message.includes("EAI_AGAIN") || message.includes("ENOTFOUND") || message.includes("ETIMEDOUT") || message.includes("ECONNREFUSED")) {
+        message = `No se puede conectar al host remoto (${scanErr.message}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
+      }
+      
+      const enrichedErr = new Error(message);
+
       // Registrar error de escaneo en los reportes históricos
-      saveErrorReport("Escaneo", scanErr.message, { downloadsFolder });
+      saveErrorReport("Escaneo", enrichedErr.message, { downloadsFolder });
 
       const isRemote = downloadsFolder.includes("://");
       const isCustomLocal = !isRemote && downloadsFolder !== "/tmp/movie_organizer/downloads";
 
       if (isRemote || isCustomLocal) {
         // Propagar el error estrictamente para rutas personalizadas o remotas
-        throw scanErr;
+        throw enrichedErr;
       }
 
       // Offline remote simulation sandbox fallback (solo para ruta local demo predeterminada)

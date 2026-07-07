@@ -1,0 +1,18 @@
+{
+  "id": "error_1783458707501",
+  "timestamp": "2026-07-07T21:11:47.501Z",
+  "totalProcessed": 0,
+  "successCount": 0,
+  "errorCount": 1,
+  "organizeType": "N/A",
+  "logs": [
+    {
+      "file": "Escaneo",
+      "status": "ERROR",
+      "message": "Error ocurrido en Escaneo: Error al leer el directorio SMB raíz \"torrent\\descargas\": getaddrinfo EAI_AGAIN ds220j.local",
+      "details": {
+        "downloadsFolder": "smb://ds220j.local/video/torrent/descargas"
+      }
+    }
+  ]
+}
