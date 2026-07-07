@@ -1267,17 +1267,24 @@ app.post("/api/workspace/reset", (req, res) => {
 
 // 4. Scan downloads folder with streaming progress
 app.get("/api/organize/scan", async (req, res) => {
-  try {
-    res.setHeader("Content-Type", "application/json-stream");
-    res.setHeader("Transfer-Encoding", "chunked");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+  let headersSet = false;
+  const ensureHeaders = () => {
+    if (!headersSet) {
+      res.setHeader("Content-Type", "application/json-stream");
+      res.setHeader("Transfer-Encoding", "chunked");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      headersSet = true;
+    }
+  };
 
+  try {
     const recursive = req.query.recursive !== "false";
 
     let movies: any[] = [];
     try {
       movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, recursive, (filePath, details) => {
+        ensureHeaders();
         res.write(JSON.stringify({
           type: "scan",
           file: filePath,
@@ -1305,6 +1312,7 @@ app.get("/api/organize/scan", async (req, res) => {
       }
 
       // Offline remote simulation sandbox fallback (solo para ruta local demo predeterminada)
+      ensureHeaders();
       res.write(JSON.stringify({
         type: "log",
         message: `Servidor local inaccesible: ${scanErr.message}. Iniciando demostración en sandbox...`
@@ -1322,13 +1330,21 @@ app.get("/api/organize/scan", async (req, res) => {
       }
     }
 
+    ensureHeaders();
     res.write(JSON.stringify({ type: "done", movies }) + "\n");
     res.end();
   } catch (err: any) {
     saveErrorReport("Escaneo", err.message, { downloadsFolder });
-    if (!res.headersSent) {
+    if (!res.headersSent && !headersSet) {
+      try {
+        res.removeHeader("Content-Type");
+        res.removeHeader("Transfer-Encoding");
+        res.removeHeader("Cache-Control");
+        res.removeHeader("Connection");
+      } catch (headerErr) {}
       res.status(500).json({ error: err.message });
     } else {
+      ensureHeaders();
       res.write(JSON.stringify({ type: "error", error: err.message }) + "\n");
       res.end();
     }
