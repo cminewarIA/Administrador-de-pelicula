@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <!-- Accent Gradient -->
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#ea580c" />
+    </linearGradient>
+    <!-- Metallic Film Reel -->
+    <linearGradient id="metal-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e2e8f0" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </linearGradient>
+    <filter id="glow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base (Ubuntu Desktop Style) -->
+  <rect x="24" y="24" width="464" height="464" rx="100" fill="url(#bg-grad)" stroke="#334155" stroke-width="8" />
+
+  <!-- Outer Film Reel Rim -->
+  <circle cx="256" cy="256" r="160" fill="none" stroke="url(#metal-grad)" stroke-width="24" />
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#475569" stroke-width="4" />
+
+  <!-- Reel Inner Holes -->
+  <circle cx="256" cy="156" r="28" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="4" />
+  <circle cx="256" cy="356" r="28" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="4" />
+  <circle cx="156" cy="256" r="28" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="4" />
+  <circle cx="356" cy="256" r="28" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="4" />
+  
+  <circle cx="185" cy="185" r="20" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="3" />
+  <circle cx="327" cy="185" r="20" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="3" />
+  <circle cx="185" cy="327" r="20" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="3" />
+  <circle cx="327" cy="327" r="20" fill="#0f172a" stroke="url(#metal-grad)" stroke-width="3" />
+
+  <!-- Central Hub / Film core -->
+  <circle cx="256" cy="256" r="56" fill="url(#accent-grad)" filter="url(#glow)" />
+  <circle cx="256" cy="256" r="44" fill="#0f172a" />
+  
+  <!-- AI Sparkle/Star in the center -->
+  <path d="M 256 236 L 261 251 L 276 256 L 261 261 L 256 276 L 251 261 L 236 256 L 251 251 Z" fill="url(#accent-grad)" />
+
+  <!-- Database Cylinders decoration at the bottom-right -->
+  <g transform="translate(320, 320) scale(0.9)">
+    <rect x="0" y="10" width="80" height="90" rx="15" fill="#1e293b" stroke="url(#accent-grad)" stroke-width="6" />
+    <path d="M 0,35 Q 40,50 80,35" fill="none" stroke="url(#accent-grad)" stroke-width="6" />
+    <path d="M 0,65 Q 40,80 80,65" fill="none" stroke="url(#accent-grad)" stroke-width="6" />
+    <ellipse cx="40" cy="10" rx="40" ry="15" fill="#334155" stroke="url(#accent-grad)" stroke-width="6" />
+  </g>
+</svg>

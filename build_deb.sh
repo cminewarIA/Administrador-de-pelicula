@@ -1,27 +1,35 @@
 #!/bin/bash
-# Build script for Movie Organizer .deb package on Ubuntu
+# Advanced Build script for Movie Organizer .deb package on Ubuntu/Debian
+# Author: Organizador de Películas AI <CMineWar1.5@gmail.com>
 
 set -e
+
+# Extract version from first parameter, or default to 1.0.0
+VERSION="${1:-1.0.0}"
+# Strip leading 'v' or 'V' if present (e.g., v1.0.1 -> 1.0.1)
+VERSION="${VERSION#[vV]}"
 
 echo "=== 1. Building Frontend and Backend ==="
 npm install
 npm run build
 
-echo "=== 2. Setting up Debian directory structure ==="
+echo "=== 2. Setting up Debian directory structure for version ${VERSION} ==="
 BUILD_DIR="/tmp/movie-organizer-deb-build"
-DEB_DEST="./movie-organizer_1.0.0_all.deb"
+DEB_DEST="./movie-organizer_${VERSION}_all.deb"
 
-# Clean up
+# Clean up any existing build dir
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/DEBIAN"
 mkdir -p "$BUILD_DIR/usr/bin"
 mkdir -p "$BUILD_DIR/usr/share/movie-organizer"
+mkdir -p "$BUILD_DIR/usr/share/applications"
+mkdir -p "$BUILD_DIR/usr/share/pixmaps"
 mkdir -p "$BUILD_DIR/lib/systemd/system"
 
 echo "=== 3. Creating DEBIAN/control ==="
-cat << 'EOF' > "$BUILD_DIR/DEBIAN/control"
+cat << EOF > "$BUILD_DIR/DEBIAN/control"
 Package: movie-organizer
-Version: 1.0.0
+Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: all
@@ -31,37 +39,106 @@ Description: Organizador inteligente de películas con Emby y Gemini AI.
  Escanea directorios de descarga de películas, lee metadatos de Emby
  y renombra los archivos con el formato estandarizado 'Título [IMDbID]'.
  Se integra con Gemini AI para lograr máxima precisión en la clasificación.
+ Incluye soporte para lanzador de escritorio y actualizaciones automáticas.
 EOF
 
-echo "=== 4. Creating DEBIAN/postinst script ==="
+echo "=== 4. Creating DEBIAN maintainer scripts (Upgrades, Restarts) ==="
+
+# postinst script
 cat << 'EOF' > "$BUILD_DIR/DEBIAN/postinst"
 #!/bin/sh
 set -e
+
+# Make launcher executable
 chmod +x /usr/bin/movie-organizer
-systemctl daemon-reload || true
-echo "Organizador de Películas instalado con éxito!"
-echo "Puedes iniciarlo con: movie-organizer"
+
+# Handle systemd setup if systemd is active on the host
+if [ -d /run/systemd/system ]; then
+    echo "Reloading systemd daemon, enabling and starting movie-organizer service..."
+    systemctl daemon-reload || true
+    systemctl enable movie-organizer || true
+    systemctl restart movie-organizer || true
+fi
+
+echo "¡Organizador de Películas instalado/actualizado con éxito!"
+echo "Puedes iniciarlo desde el buscador de aplicaciones o con: movie-organizer"
 exit 0
 EOF
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
 
-echo "=== 5. Creating usr/bin/movie-organizer launcher ==="
+# prerm script (called before removal or upgrade)
+cat << 'EOF' > "$BUILD_DIR/DEBIAN/prerm"
+#!/bin/sh
+set -e
+
+# Stop service if systemd is active on the host
+if [ -d /run/systemd/system ] && [ "$1" = "remove" -o "$1" = "upgrade" ]; then
+    echo "Stopping movie-organizer service before removal/upgrade..."
+    systemctl stop movie-organizer || true
+fi
+
+exit 0
+EOF
+chmod 755 "$BUILD_DIR/DEBIAN/prerm"
+
+# postrm script (called after removal or upgrade)
+cat << 'EOF' > "$BUILD_DIR/DEBIAN/postrm"
+#!/bin/sh
+set -e
+
+# Reload systemd daemon if service is removed or purged
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+exit 0
+EOF
+chmod 755 "$BUILD_DIR/DEBIAN/postrm"
+
+echo "=== 5. Creating launcher executable (/usr/bin/movie-organizer) ==="
+# This smart launcher handles both desktop launcher clicks and headless CLI execution
 cat << 'EOF' > "$BUILD_DIR/usr/bin/movie-organizer"
 #!/bin/bash
-# Executable to launch the Movie Organizer application
-echo "Iniciando Organizador de Películas..."
-if [ -z "$GEMINI_API_KEY" ]; then
-  echo "ADVERTENCIA: La variable GEMINI_API_KEY no está configurada."
-  echo "Se utilizará el algoritmo de emparejamiento local de respaldo."
+# Executable launcher for Movie Organizer application
+
+# Check if running in a graphical desktop session
+if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+  # User clicked desktop launcher or ran from desktop terminal
+  # Check if port 3000 is already in use
+  if ! ss -tuln | grep -q ":3000 "; then
+    echo "Iniciando servidor de metadatos de películas en segundo plano..."
+    if [ -z "$GEMINI_API_KEY" ]; then
+      echo "ADVERTENCIA: La variable GEMINI_API_KEY no está configurada."
+    fi
+    node /usr/share/movie-organizer/server.cjs > /tmp/movie-organizer.log 2>&1 &
+    
+    # Wait for server to boot (max 5 seconds)
+    for i in {1..10}; do
+      if ss -tuln | grep -q ":3000 "; then
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  
+  # Open web UI in default browser
+  echo "Abriendo Organizador de Películas en el navegador..."
+  xdg-open "http://localhost:3000" > /dev/null 2>&1 &
+else
+  # Running in non-graphical context (e.g. systemd or ssh terminal)
+  echo "Iniciando Organizador de Películas en modo servicio (Puerto 3000)..."
+  if [ -z "$GEMINI_API_KEY" ]; then
+    echo "ADVERTENCIA: La variable GEMINI_API_KEY no está configurada."
+  fi
+  exec node /usr/share/movie-organizer/server.cjs
 fi
-node /usr/share/movie-organizer/server.cjs
 EOF
 chmod 755 "$BUILD_DIR/usr/bin/movie-organizer"
 
 echo "=== 6. Creating Systemd service configuration ==="
 cat << 'EOF' > "$BUILD_DIR/lib/systemd/system/movie-organizer.service"
 [Unit]
-Description=Movie Organizer Web Service
+Description=Servicio Web del Organizador de Películas
 After=network.target
 
 [Service]
@@ -76,11 +153,30 @@ Environment=PORT=3000
 WantedBy=multi-user.target
 EOF
 
-echo "=== 7. Copying build artifacts ==="
+echo "=== 7. Creating Desktop Entry and Icon ==="
+# Desktop Entry to appear in Ubuntu applications launcher menu
+cat << 'EOF' > "$BUILD_DIR/usr/share/applications/movie-organizer.desktop"
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Organizador de Películas AI
+Comment=Estandariza tus películas usando metadatos inteligentes de Emby, TMDb, Trakt y Gemini
+Exec=/usr/bin/movie-organizer
+Icon=movie-organizer
+Terminal=false
+Categories=Utility;FileTools;Database;
+Keywords=movie;organizer;emby;gemini;tmdb;trakt;
+StartupNotify=true
+EOF
+
+# Copy our beautiful scalable vector SVG icon
+cp ./assets/movie-organizer.svg "$BUILD_DIR/usr/share/pixmaps/movie-organizer.svg"
+
+echo "=== 8. Copying build artifacts ==="
 cp dist/server.cjs "$BUILD_DIR/usr/share/movie-organizer/server.cjs"
 cp -r dist "$BUILD_DIR/usr/share/movie-organizer/dist"
 
-echo "=== 8. Packaging .deb ==="
+echo "=== 9. Packaging .deb ==="
 dpkg-deb --build "$BUILD_DIR" "$DEB_DEST"
 
 echo "=== SUCCESS: .deb package created at $DEB_DEST ==="
