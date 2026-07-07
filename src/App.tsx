@@ -127,23 +127,55 @@ export default function App() {
     }
   };
 
-  // Scan folder for movies
+  // Scan folder for movies with real-time stream decoding
   const scanDownloads = async () => {
     setIsScanning(true);
     setRecentReport(null);
     addLog(`Escaneando carpeta de origen: ${downloadsPath}`, "info");
     try {
       const res = await fetch("/api/organize/scan");
-      const data = await res.json();
-      if (data.movies) {
-        const moviesList = data.movies.map((m: any) => ({
-          ...m,
-          status: "idle" as const
-        }));
-        setMovies(moviesList);
-        // Select all by default
-        setSelectedMovieIds(moviesList.map((m: any) => m.id));
-        addLog(`Escaneo completo. Encontradas ${moviesList.length} películas listas para procesar.`, "success");
+      if (!res.body) {
+        throw new Error("El servidor no soporta la transmisión de progreso de escaneo.");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        // Keep the last partial line in the buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.type === "scan") {
+              const nfoInfo = data.hasNfo ? ` (NFO detectado${data.embyTitle ? `: ${data.embyTitle}` : ""})` : " (Sin NFO)";
+              addLog(`[LECTURA] Leyendo archivo: ${data.file}${nfoInfo}`, "info");
+            } else if (data.type === "done") {
+              if (data.movies) {
+                const moviesList = data.movies.map((m: any) => ({
+                  ...m,
+                  status: "idle" as const
+                }));
+                setMovies(moviesList);
+                // Select all by default
+                setSelectedMovieIds(moviesList.map((m: any) => m.id));
+                addLog(`Escaneo completo. Encontradas ${moviesList.length} películas listas para procesar.`, "success");
+              }
+            } else if (data.type === "error") {
+              addLog(`Error reportado por el servidor: ${data.error}`, "error");
+            }
+          } catch (err: any) {
+            console.error("Error al decodificar línea de progreso de escaneo:", err);
+          }
+        }
       }
     } catch (e: any) {
       addLog(`Error al escanear directorio: ${e.message}`, "error");

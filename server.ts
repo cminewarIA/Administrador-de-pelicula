@@ -312,7 +312,11 @@ function parseNfo(nfoContent: string) {
 }
 
 // Recursive file scanner for movie files
-function getMovieFiles(dir: string, baseDir = dir): any[] {
+function getMovieFiles(
+  dir: string,
+  baseDir = dir,
+  onFile?: (filePath: string, details: { hasNfo: boolean; embyTitle: string | null }) => void
+): any[] {
   let results: any[] = [];
   if (!fs.existsSync(dir)) return [];
   const list = fs.readdirSync(dir);
@@ -322,7 +326,7 @@ function getMovieFiles(dir: string, baseDir = dir): any[] {
     const stat = fs.statSync(fullPath);
 
     if (stat && stat.isDirectory()) {
-      results = results.concat(getMovieFiles(fullPath, baseDir));
+      results = results.concat(getMovieFiles(fullPath, baseDir, onFile));
     } else {
       const ext = path.extname(file).toLowerCase();
       const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
@@ -361,6 +365,10 @@ function getMovieFiles(dir: string, baseDir = dir): any[] {
           } catch (e) {
             console.error("Error reading NFO:", e);
           }
+        }
+
+        if (onFile) {
+          onFile(fullPath, { hasNfo, embyTitle });
         }
 
         results.push({
@@ -445,13 +453,32 @@ app.post("/api/workspace/reset", (req, res) => {
   }
 });
 
-// 4. Scan downloads folder
+// 4. Scan downloads folder with streaming progress
 app.get("/api/organize/scan", (req, res) => {
   try {
-    const movies = getMovieFiles(downloadsFolder);
-    res.json({ movies });
+    res.setHeader("Content-Type", "application/json-stream");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const movies = getMovieFiles(downloadsFolder, downloadsFolder, (filePath, details) => {
+      res.write(JSON.stringify({
+        type: "scan",
+        file: path.relative(downloadsFolder, filePath),
+        hasNfo: details.hasNfo,
+        embyTitle: details.embyTitle
+      }) + "\n");
+    });
+
+    res.write(JSON.stringify({ type: "done", movies }) + "\n");
+    res.end();
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.write(JSON.stringify({ type: "error", error: err.message }) + "\n");
+      res.end();
+    }
   }
 });
 
