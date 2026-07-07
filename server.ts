@@ -6,6 +6,9 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { execSync } from "child_process";
+import SMB2 from "smb2";
+import * as ftp from "basic-ftp";
+import { Readable, Writable } from "stream";
 
 dotenv.config();
 
@@ -18,6 +21,7 @@ app.use(express.json());
 let downloadsFolder = "/tmp/movie_organizer/downloads";
 let organizedFolder = "/tmp/movie_organizer/organized";
 const reportsFolder = "/tmp/movie_organizer/reports";
+let customGeminiApiKey = "";
 
 // Local lookup database for fallback matches when Gemini API Key is missing or for seed validation
 const LOCAL_MOVIE_DB: Record<string, { title: string; year: number; imdbId: string; synopsis: string; posterUrl: string; rating: number; sourceUsed: string; reasoning: string }> = {
@@ -154,7 +158,7 @@ seedWorkspace();
 
 // Match movie with Gemini AI SDK
 async function matchMovieWithGemini(fileName: string, nfoData: any): Promise<any> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = customGeminiApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
     return fallbackMatch(fileName, nfoData);
   }
@@ -311,105 +315,758 @@ function parseNfo(nfoContent: string) {
   };
 }
 
-// Recursive file scanner for movie files
-function getMovieFiles(
-  dir: string,
-  baseDir = dir,
-  onFile?: (filePath: string, details: { hasNfo: boolean; embyTitle: string | null }) => void
-): any[] {
-  let results: any[] = [];
-  if (!fs.existsSync(dir)) return [];
-  const list = fs.readdirSync(dir);
+// VFS URL parser supporting smb:// and ftp://
+function parseUrl(urlStr: string) {
+  let decoded = urlStr;
+  try {
+    decoded = decodeURIComponent(urlStr);
+  } catch (e) {}
 
-  list.forEach((file) => {
-    const fullPath = path.join(dir, file);
-    const stat = fs.statSync(fullPath);
-
-    if (stat && stat.isDirectory()) {
-      results = results.concat(getMovieFiles(fullPath, baseDir, onFile));
-    } else {
-      const ext = path.extname(file).toLowerCase();
-      const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+  if (decoded.startsWith("smb://")) {
+    try {
+      const url = new URL(decoded);
+      const host = url.hostname;
+      const port = url.port ? parseInt(url.port, 10) : 445;
+      const username = url.username || "guest";
+      const password = url.password || "";
       
-      if (videoExtensions.includes(ext)) {
-        // Find potential associated Emby NFO
-        let nfoPath = null;
-        let nfoContent = null;
-        let hasNfo = false;
-        let embyTitle = null;
-        let embyYear = null;
-        let embyImdb = null;
-
-        // 1. Check same filename but with .nfo
-        const sameNameNfo = fullPath.replace(ext, ".nfo");
-        if (fs.existsSync(sameNameNfo)) {
-          nfoPath = sameNameNfo;
-        } else {
-          // 2. Check any .nfo inside the same directory
-          const parentDir = path.dirname(fullPath);
-          const parentFiles = fs.readdirSync(parentDir);
-          const folderNfo = parentFiles.find(f => f.endsWith(".nfo"));
-          if (folderNfo) {
-            nfoPath = path.join(parentDir, folderNfo);
-          }
-        }
-
-        if (nfoPath) {
-          try {
-            nfoContent = fs.readFileSync(nfoPath, "utf-8");
-            const parsed = parseNfo(nfoContent);
-            embyTitle = parsed.title;
-            embyYear = parsed.year;
-            embyImdb = parsed.imdbId;
-            hasNfo = true;
-          } catch (e) {
-            console.error("Error reading NFO:", e);
-          }
-        }
-
-        if (onFile) {
-          onFile(fullPath, { hasNfo, embyTitle });
-        }
-
-        results.push({
-          id: Buffer.from(fullPath).toString("base64"),
-          originalPath: fullPath,
-          relativePath: path.relative(baseDir, fullPath),
-          fileName: file,
-          extension: ext,
-          folderName: path.basename(path.dirname(fullPath)) === path.basename(baseDir) ? "" : path.basename(path.dirname(fullPath)),
-          hasNfo,
-          sizeBytes: stat.size,
-          embyTitle,
-          embyYear,
-          embyImdb
-        });
+      const pathname = url.pathname.replace(/^\//, "");
+      const parts = pathname.split("/");
+      const share = parts[0] || "";
+      const subpath = parts.slice(1).join("/");
+      
+      return {
+        protocol: "smb" as const,
+        host,
+        port,
+        username,
+        password,
+        share,
+        subpath,
+        fullPath: decoded
+      };
+    } catch (e) {
+      const withoutProto = decoded.slice(6);
+      const firstSlash = withoutProto.indexOf("/");
+      const hostPortAndCreds = firstSlash !== -1 ? withoutProto.slice(0, firstSlash) : withoutProto;
+      const pathAndShare = firstSlash !== -1 ? withoutProto.slice(firstSlash + 1) : "";
+      
+      let hostAndCreds = hostPortAndCreds;
+      let port = 445;
+      const portIndex = hostPortAndCreds.indexOf(":");
+      if (portIndex !== -1) {
+        hostAndCreds = hostPortAndCreds.slice(0, portIndex);
+        port = parseInt(hostPortAndCreds.slice(portIndex + 1), 10) || 445;
       }
+      
+      let username = "guest";
+      let password = "";
+      let host = hostAndCreds;
+      const atIndex = hostAndCreds.indexOf("@");
+      if (atIndex !== -1) {
+        const creds = hostAndCreds.slice(0, atIndex);
+        host = hostAndCreds.slice(atIndex + 1);
+        const colonIndex = creds.indexOf(":");
+        if (colonIndex !== -1) {
+          username = creds.slice(0, colonIndex);
+          password = creds.slice(colonIndex + 1);
+        } else {
+          username = creds;
+        }
+      }
+
+      const shareIndex = pathAndShare.indexOf("/");
+      const share = shareIndex !== -1 ? pathAndShare.slice(0, shareIndex) : pathAndShare;
+      const subpath = shareIndex !== -1 ? pathAndShare.slice(shareIndex + 1) : "";
+
+      return {
+        protocol: "smb" as const,
+        host,
+        port,
+        username,
+        password,
+        share,
+        subpath,
+        fullPath: decoded
+      };
     }
+  } else if (decoded.startsWith("ftp://")) {
+    try {
+      const url = new URL(decoded);
+      const host = url.hostname;
+      const port = url.port ? parseInt(url.port, 10) : 21;
+      const username = url.username || "anonymous";
+      const password = url.password || "anonymous@";
+      const subpath = url.pathname;
+      
+      return {
+        protocol: "ftp" as const,
+        host,
+        port,
+        username,
+        password,
+        subpath,
+        fullPath: decoded
+      };
+    } catch (e) {
+      const withoutProto = decoded.slice(6);
+      const firstSlash = withoutProto.indexOf("/");
+      const hostPortAndCreds = firstSlash !== -1 ? withoutProto.slice(0, firstSlash) : withoutProto;
+      const subpath = firstSlash !== -1 ? withoutProto.slice(firstSlash) : "/";
+
+      let hostAndCreds = hostPortAndCreds;
+      let port = 21;
+      const portIndex = hostPortAndCreds.indexOf(":");
+      if (portIndex !== -1) {
+        hostAndCreds = hostPortAndCreds.slice(0, portIndex);
+        port = parseInt(hostPortAndCreds.slice(portIndex + 1), 10) || 21;
+      }
+
+      let username = "anonymous";
+      let password = "anonymous@";
+      let host = hostAndCreds;
+      const atIndex = hostAndCreds.indexOf("@");
+      if (atIndex !== -1) {
+        const creds = hostAndCreds.slice(0, atIndex);
+        host = hostAndCreds.slice(atIndex + 1);
+        const colonIndex = creds.indexOf(":");
+        if (colonIndex !== -1) {
+          username = creds.slice(0, colonIndex);
+          password = creds.slice(colonIndex + 1);
+        } else {
+          username = creds;
+        }
+      }
+
+      return {
+        protocol: "ftp" as const,
+        host,
+        port,
+        username,
+        password,
+        subpath,
+        fullPath: decoded
+      };
+    }
+  } else {
+    return {
+      protocol: "file" as const,
+      fullPath: decoded
+    };
+  }
+}
+
+// Promisified wrappers for smb2
+const smbReaddir = (client: any, subpath: string) => 
+  new Promise<string[]>((res, rej) => {
+    client.readdir(subpath, (err: any, files: string[]) => {
+      if (err) rej(err);
+      else res(files);
+    });
   });
 
-  return results;
+const smbReadFile = (client: any, subpath: string) => 
+  new Promise<Buffer>((res, rej) => {
+    client.readFile(subpath, (err: any, data: Buffer) => {
+      if (err) rej(err);
+      else res(data);
+    });
+  });
+
+const smbWriteFile = (client: any, subpath: string, data: any) => 
+  new Promise<void>((res, rej) => {
+    client.writeFile(subpath, data, (err: any) => {
+      if (err) rej(err);
+      else res();
+    });
+  });
+
+const smbMkdir = (client: any, subpath: string) => 
+  new Promise<void>((res, rej) => {
+    client.mkdir(subpath, (err: any) => {
+      if (err) rej(err);
+      else res();
+    });
+  });
+
+const smbRename = (client: any, oldPath: string, newPath: string) => 
+  new Promise<void>((res, rej) => {
+    client.rename(oldPath, newPath, (err: any) => {
+      if (err) rej(err);
+      else res();
+    });
+  });
+
+const smbUnlink = (client: any, subpath: string) => 
+  new Promise<void>((res, rej) => {
+    client.unlink(subpath, (err: any) => {
+      if (err) rej(err);
+      else res();
+    });
+  });
+
+const smbExists = (client: any, subpath: string) => 
+  new Promise<boolean>((res) => {
+    client.exists(subpath, (err: any, exists: boolean) => {
+      if (err) res(false);
+      else res(!!exists);
+    });
+  });
+
+async function runWithSmb<T>(urlStr: string, fn: (client: any, subpath: string) => Promise<T>): Promise<T> {
+  const parsed = parseUrl(urlStr);
+  if (parsed.protocol !== "smb") throw new Error("No es una dirección SMB válida.");
+  
+  const sharePath = `\\\\${parsed.host}\\${parsed.share}`;
+  const client = new SMB2({
+    share: sharePath,
+    username: parsed.username,
+    password: parsed.password,
+    domain: "WORKGROUP",
+    autoClose: false
+  });
+
+  try {
+    const subpath = parsed.subpath.replace(/\//g, "\\");
+    const res = await fn(client, subpath);
+    client.close();
+    return res;
+  } catch (err) {
+    client.close();
+    throw err;
+  }
+}
+
+async function runWithFtp<T>(urlStr: string, fn: (client: ftp.Client, subpath: string) => Promise<T>): Promise<T> {
+  const parsed = parseUrl(urlStr);
+  if (parsed.protocol !== "ftp") throw new Error("No es una dirección FTP válida.");
+
+  const client = new ftp.Client();
+  client.ftp.verbose = false;
+  try {
+    await client.access({
+      host: parsed.host,
+      port: parsed.port,
+      user: parsed.username,
+      password: parsed.password,
+      secure: false
+    });
+    return await fn(client, parsed.subpath || "/");
+  } finally {
+    client.close();
+  }
+}
+
+// Unified path joining helper supporting remote URLs and local absolute paths
+function joinVfsPaths(base: string, ...segments: string[]): string {
+  if (base.includes("://")) {
+    let url = base.replace(/\/+$/, "");
+    for (const segment of segments) {
+      if (segment) {
+        url += "/" + segment.replace(/^\/+/, "").replace(/\/+$/, "");
+      }
+    }
+    return url;
+  }
+  return path.join(base, ...segments);
+}
+
+// Unified virtual file system (VFS) operations layer
+const VFS = {
+  async exists(urlStr: string): Promise<boolean> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      try {
+        return await runWithSmb(urlStr, (client, subpath) => smbExists(client, subpath));
+      } catch {
+        return false;
+      }
+    } else if (parsed.protocol === "ftp") {
+      try {
+        return await runWithFtp(urlStr, async (client, subpath) => {
+          try {
+            await client.size(subpath);
+            return true;
+          } catch {
+            try {
+              const list = await client.list(path.dirname(subpath));
+              return list.some(item => item.name === path.basename(subpath));
+            } catch {
+              return false;
+            }
+          }
+        });
+      } catch {
+        return false;
+      }
+    } else {
+      return fs.existsSync(parsed.fullPath);
+    }
+  },
+
+  async readFile(urlStr: string): Promise<string> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      const buffer = await runWithSmb(urlStr, (client, subpath) => smbReadFile(client, subpath));
+      return buffer.toString("utf8");
+    } else if (parsed.protocol === "ftp") {
+      return await runWithFtp(urlStr, async (client, subpath) => {
+        const chunks: Buffer[] = [];
+        const stream = new Writable({
+          write(chunk, encoding, next) {
+            chunks.push(chunk);
+            next();
+          }
+        });
+        await client.downloadTo(stream, subpath);
+        return Buffer.concat(chunks).toString("utf8");
+      });
+    } else {
+      return fs.readFileSync(parsed.fullPath, "utf8");
+    }
+  },
+
+  async writeFile(urlStr: string, content: string): Promise<void> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      await runWithSmb(urlStr, (client, subpath) => smbWriteFile(client, subpath, content));
+    } else if (parsed.protocol === "ftp") {
+      await runWithFtp(urlStr, async (client, subpath) => {
+        const stream = new Readable();
+        stream.push(content);
+        stream.push(null);
+        await client.uploadFrom(stream, subpath);
+      });
+    } else {
+      fs.writeFileSync(parsed.fullPath, content, "utf8");
+    }
+  },
+
+  async mkdir(urlStr: string): Promise<void> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      await runWithSmb(urlStr, async (client, subpath) => {
+        const parts = subpath.split("\\").filter(Boolean);
+        let current = "";
+        for (const part of parts) {
+          current = current ? `${current}\\${part}` : part;
+          try {
+            const exists = await smbExists(client, current);
+            if (!exists) {
+              await smbMkdir(client, current);
+            }
+          } catch (e) {}
+        }
+      });
+    } else if (parsed.protocol === "ftp") {
+      await runWithFtp(urlStr, async (client, subpath) => {
+        await client.ensureDir(subpath);
+      });
+    } else {
+      fs.mkdirSync(parsed.fullPath, { recursive: true });
+    }
+  },
+
+  async rename(srcUrlStr: string, destUrlStr: string): Promise<void> {
+    const srcParsed = parseUrl(srcUrlStr);
+    const destParsed = parseUrl(destUrlStr);
+
+    if (srcParsed.protocol === "file" && destParsed.protocol === "file") {
+      fs.renameSync(srcParsed.fullPath, destParsed.fullPath);
+      return;
+    }
+
+    if (srcParsed.protocol === "smb" && destParsed.protocol === "smb" && srcParsed.host === destParsed.host && srcParsed.share === destParsed.share) {
+      await runWithSmb(srcUrlStr, (client, srcSubpath) => {
+        const destSubpath = destParsed.subpath.replace(/\//g, "\\");
+        return smbRename(client, srcSubpath, destSubpath);
+      });
+      return;
+    }
+
+    if (srcParsed.protocol === "ftp" && destParsed.protocol === "ftp" && srcParsed.host === destParsed.host) {
+      await runWithFtp(srcUrlStr, async (client, srcSubpath) => {
+        await client.rename(srcSubpath, destParsed.subpath);
+      });
+      return;
+    }
+
+    const content = await VFS.readFileBuffer(srcUrlStr);
+    await VFS.writeFileBuffer(destUrlStr, content);
+    await VFS.unlink(srcUrlStr);
+  },
+
+  async unlink(urlStr: string): Promise<void> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      await runWithSmb(urlStr, (client, subpath) => smbUnlink(client, subpath));
+    } else if (parsed.protocol === "ftp") {
+      await runWithFtp(urlStr, async (client, subpath) => {
+        await client.remove(subpath);
+      });
+    } else {
+      if (fs.existsSync(parsed.fullPath)) {
+        fs.unlinkSync(parsed.fullPath);
+      }
+    }
+  },
+
+  async readFileBuffer(urlStr: string): Promise<Buffer> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      return await runWithSmb(urlStr, (client, subpath) => smbReadFile(client, subpath));
+    } else if (parsed.protocol === "ftp") {
+      return await runWithFtp(urlStr, async (client, subpath) => {
+        const chunks: Buffer[] = [];
+        const stream = new Writable({
+          write(chunk, encoding, next) {
+            chunks.push(chunk);
+            next();
+          }
+        });
+        await client.downloadTo(stream, subpath);
+        return Buffer.concat(chunks);
+      });
+    } else {
+      return fs.readFileSync(parsed.fullPath);
+    }
+  },
+
+  async writeFileBuffer(urlStr: string, buffer: Buffer): Promise<void> {
+    const parsed = parseUrl(urlStr);
+    if (parsed.protocol === "smb") {
+      await runWithSmb(urlStr, (client, subpath) => smbWriteFile(client, subpath, buffer));
+    } else if (parsed.protocol === "ftp") {
+      await runWithFtp(urlStr, async (client, subpath) => {
+        const stream = new Readable();
+        stream.push(buffer);
+        stream.push(null);
+        await client.uploadFrom(stream, subpath);
+      });
+    } else {
+      fs.writeFileSync(parsed.fullPath, buffer);
+    }
+  }
+};
+
+// Recursive file scanner for movie files supporting local, SMB, and FTP VFS locations
+async function getMovieFilesVFS(
+  dirUrl: string,
+  baseDirUrl = dirUrl,
+  onFile?: (filePath: string, details: { hasNfo: boolean; embyTitle: string | null }) => void
+): Promise<any[]> {
+  const parsed = parseUrl(dirUrl);
+
+  if (parsed.protocol === "file") {
+    let results: any[] = [];
+    const dir = parsed.fullPath;
+    if (!fs.existsSync(dir)) return [];
+    const list = fs.readdirSync(dir);
+
+    for (const file of list) {
+      const fullPath = path.join(dir, file);
+      const stat = fs.statSync(fullPath);
+
+      if (stat && stat.isDirectory()) {
+        const subResults = await getMovieFilesVFS(fullPath, baseDirUrl, onFile);
+        results = results.concat(subResults);
+      } else {
+        const ext = path.extname(file).toLowerCase();
+        const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+        if (videoExtensions.includes(ext)) {
+          const nfoPath = fullPath.replace(ext, ".nfo");
+          let hasNfo = false;
+          let embyTitle = null;
+          let embyYear = null;
+          let embyImdb = null;
+
+          if (fs.existsSync(nfoPath)) {
+            hasNfo = true;
+            try {
+              const nfoContent = fs.readFileSync(nfoPath, "utf-8");
+              const parsedNfo = parseNfo(nfoContent);
+              embyTitle = parsedNfo.title;
+              embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
+              embyImdb = parsedNfo.imdbId;
+            } catch (e) {}
+          }
+
+          if (onFile) {
+            onFile(fullPath, { hasNfo, embyTitle });
+          }
+
+          results.push({
+            id: Buffer.from(fullPath).toString("base64"),
+            originalPath: fullPath,
+            relativePath: path.relative(baseDirUrl, fullPath),
+            fileName: file,
+            extension: ext,
+            folderName: path.basename(path.dirname(fullPath)) === path.basename(baseDirUrl) ? "" : path.basename(path.dirname(fullPath)),
+            hasNfo,
+            sizeBytes: stat.size,
+            embyTitle,
+            embyYear,
+            embyImdb
+          });
+        }
+      }
+    }
+    return results;
+
+  } else if (parsed.protocol === "smb") {
+    return await runWithSmb(dirUrl, async (client, subpath) => {
+      const results: any[] = [];
+      
+      const scanDir = async (currentSubpath: string) => {
+        const files = await smbReaddir(client, currentSubpath);
+        for (const file of files) {
+          const fullSubpath = currentSubpath ? `${currentSubpath}\\${file}` : file;
+          let isDir = false;
+          try {
+            await smbReaddir(client, fullSubpath);
+            isDir = true;
+          } catch (e) {}
+
+          if (isDir) {
+            await scanDir(fullSubpath);
+          } else {
+            const ext = path.extname(file).toLowerCase();
+            const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+            if (videoExtensions.includes(ext)) {
+              const fullUrl = `smb://${parsed.host}/${parsed.share}/${fullSubpath.replace(/\\/g, "/")}`;
+              const nfoSubpath = fullSubpath.replace(new RegExp(ext + "$", "i"), ".nfo");
+              let hasNfo = false;
+              let embyTitle = null;
+              let embyYear = null;
+              let embyImdb = null;
+
+              try {
+                const nfoExists = await smbExists(client, nfoSubpath);
+                if (nfoExists) {
+                  hasNfo = true;
+                  const nfoBuffer = await smbReadFile(client, nfoSubpath);
+                  const parsedNfo = parseNfo(nfoBuffer.toString("utf-8"));
+                  embyTitle = parsedNfo.title;
+                  embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
+                  embyImdb = parsedNfo.imdbId;
+                }
+              } catch (e) {}
+
+              if (onFile) {
+                onFile(fullUrl, { hasNfo, embyTitle });
+              }
+
+              results.push({
+                id: Buffer.from(fullUrl).toString("base64"),
+                originalPath: fullUrl,
+                relativePath: file,
+                fileName: file,
+                extension: ext,
+                folderName: currentSubpath.split("\\").pop() || "",
+                hasNfo,
+                sizeBytes: 104857600,
+                embyTitle,
+                embyYear,
+                embyImdb
+              });
+            }
+          }
+        }
+      };
+
+      await scanDir(subpath);
+      return results;
+    });
+
+  } else if (parsed.protocol === "ftp") {
+    return await runWithFtp(dirUrl, async (client, subpath) => {
+      const results: any[] = [];
+
+      const scanDir = async (currentSubpath: string) => {
+        const list = await client.list(currentSubpath);
+        for (const item of list) {
+          const itemPath = currentSubpath.endsWith("/") ? `${currentSubpath}${item.name}` : `${currentSubpath}/${item.name}`;
+          if (item.isDirectory) {
+            await scanDir(itemPath);
+          } else {
+            const ext = path.extname(item.name).toLowerCase();
+            const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v"];
+            if (videoExtensions.includes(ext)) {
+              const fullUrl = `ftp://${parsed.host}${itemPath}`;
+              const nfoPath = itemPath.replace(new RegExp(ext + "$", "i"), ".nfo");
+              let hasNfo = false;
+              let embyTitle = null;
+              let embyYear = null;
+              let embyImdb = null;
+
+              try {
+                const chunks: Buffer[] = [];
+                const stream = new Writable({
+                  write(chunk, encoding, next) {
+                    chunks.push(chunk);
+                    next();
+                  }
+                });
+                await client.downloadTo(stream, nfoPath);
+                const nfoContent = Buffer.concat(chunks).toString("utf-8");
+                hasNfo = true;
+                const parsedNfo = parseNfo(nfoContent);
+                embyTitle = parsedNfo.title;
+                embyYear = parsedNfo.year ? String(parsedNfo.year) : null;
+                embyImdb = parsedNfo.imdbId;
+              } catch (e) {}
+
+              if (onFile) {
+                onFile(fullUrl, { hasNfo, embyTitle });
+              }
+
+              results.push({
+                id: Buffer.from(fullUrl).toString("base64"),
+                originalPath: fullUrl,
+                relativePath: item.name,
+                fileName: item.name,
+                extension: ext,
+                folderName: currentSubpath.split("/").pop() || "",
+                hasNfo,
+                sizeBytes: item.size || 104857600,
+                embyTitle,
+                embyYear,
+                embyImdb
+              });
+            }
+          }
+        }
+      };
+
+      await scanDir(subpath);
+      return results;
+    });
+  }
+
+  return [];
+}
+
+// Generate high quality simulated movie files for sandbox environment demo
+async function getMockMovieFiles(): Promise<any[]> {
+  const samples = [
+    {
+      folder: "Inception.2010.1080p",
+      filename: "Inception.2010.1080p.BluRay.mp4",
+      hasNfo: true,
+      embyTitle: "Inception",
+      embyYear: "2010",
+      embyImdb: "tt1375666",
+      ext: ".mp4"
+    },
+    {
+      folder: "Interstellar.2014.Bluray",
+      filename: "Interstellar_2014_FullMovie.mkv",
+      hasNfo: true,
+      embyTitle: "Interstellar",
+      embyYear: "2014",
+      embyImdb: null,
+      ext: ".mkv"
+    },
+    {
+      folder: "",
+      filename: "El.Padrino.1972.Spanish.Bluray.mp4",
+      hasNfo: true,
+      embyTitle: "El Padrino",
+      embyYear: "1972",
+      embyImdb: null,
+      ext: ".mp4"
+    },
+    {
+      folder: "Avatar.The.Way.Of.Water.2022.WEB-DL",
+      filename: "avatar.the.way.of.water.2022.1080p.mkv",
+      hasNfo: false,
+      embyTitle: null,
+      embyYear: null,
+      embyImdb: null,
+      ext: ".mkv"
+    },
+    {
+      folder: "Spirited Away (2001)",
+      filename: "spirited.away.anime.avi",
+      hasNfo: true,
+      embyTitle: "Spirited Away",
+      embyYear: "2001",
+      embyImdb: "tt0245429",
+      ext: ".avi"
+    }
+  ];
+
+  return samples.map(sample => {
+    const folderPrefix = sample.folder ? sample.folder + "/" : "";
+    const originalPath = joinVfsPaths(downloadsFolder, `${folderPrefix}${sample.filename}`);
+    return {
+      id: Buffer.from(originalPath).toString("base64"),
+      originalPath,
+      relativePath: sample.filename,
+      fileName: sample.filename,
+      extension: sample.ext,
+      folderName: sample.folder,
+      hasNfo: sample.hasNfo,
+      sizeBytes: 104857600,
+      embyTitle: sample.embyTitle,
+      embyYear: sample.embyYear,
+      embyImdb: sample.embyImdb
+    };
+  });
 }
 
 // ------------------- API Endpoints -------------------
 
 // 1. Get workspace configurations
-app.get("/api/workspace", (req, res) => {
-  const downloadsExists = fs.existsSync(downloadsFolder);
-  const organizedExists = fs.existsSync(organizedFolder);
+app.get("/api/workspace", async (req, res) => {
+  const isDownloadsRemote = downloadsFolder.includes("://");
+  const isOrganizedRemote = organizedFolder.includes("://");
 
+  let downloadsExists = false;
+  let organizedExists = false;
   let downloadsCount = 0;
   let organizedCount = 0;
 
-  if (downloadsExists) {
+  if (isDownloadsRemote) {
+    downloadsExists = true;
     try {
-      downloadsCount = getMovieFiles(downloadsFolder).length;
-    } catch (e) {}
+      const files = await getMovieFilesVFS(downloadsFolder);
+      downloadsCount = files.length;
+    } catch (e) {
+      // VFS remote offline fallback
+    }
+  } else {
+    downloadsExists = fs.existsSync(downloadsFolder);
+    if (downloadsExists) {
+      try {
+        const files = await getMovieFilesVFS(downloadsFolder);
+        downloadsCount = files.length;
+      } catch (e) {}
+    }
   }
-  if (organizedExists) {
+
+  if (isOrganizedRemote) {
+    organizedExists = true;
     try {
-      organizedCount = fs.readdirSync(organizedFolder).length;
+      const parsed = parseUrl(organizedFolder);
+      if (parsed.protocol === "smb") {
+        const files = await runWithSmb(organizedFolder, (client, subpath) => smbReaddir(client, subpath));
+        organizedCount = files.length;
+      } else if (parsed.protocol === "ftp") {
+        const files = await runWithFtp(organizedFolder, async (client, subpath) => {
+          const list = await client.list(subpath);
+          return list.map(item => item.name);
+        });
+        organizedCount = files.length;
+      }
     } catch (e) {}
+  } else {
+    organizedExists = fs.existsSync(organizedFolder);
+    if (organizedExists) {
+      try {
+        organizedCount = fs.readdirSync(organizedFolder).length;
+      } catch (e) {}
+    }
   }
 
   res.json({
@@ -419,22 +1076,34 @@ app.get("/api/workspace", (req, res) => {
     organizedExists,
     downloadsCount,
     organizedCount,
-    hasGeminiKey: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY"
+    hasGeminiKey: !!customGeminiApiKey || (!!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY")
   });
 });
 
 // 2. Configure paths
 app.post("/api/workspace/config", (req, res) => {
-  const { downloads, organized } = req.body;
+  const { downloads, organized, geminiApiKey } = req.body;
   if (downloads) {
     downloadsFolder = downloads;
-    fs.mkdirSync(downloadsFolder, { recursive: true });
+    if (!downloadsFolder.includes("://")) {
+      fs.mkdirSync(downloadsFolder, { recursive: true });
+    }
   }
   if (organized) {
     organizedFolder = organized;
-    fs.mkdirSync(organizedFolder, { recursive: true });
+    if (!organizedFolder.includes("://")) {
+      fs.mkdirSync(organizedFolder, { recursive: true });
+    }
   }
-  res.json({ success: true, downloadsFolder, organizedFolder });
+  if (geminiApiKey !== undefined) {
+    customGeminiApiKey = geminiApiKey;
+  }
+  res.json({ 
+    success: true, 
+    downloadsFolder, 
+    organizedFolder,
+    hasGeminiKey: !!customGeminiApiKey || (!!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY")
+  });
 });
 
 // 3. Reset and seed workspace
@@ -454,21 +1123,41 @@ app.post("/api/workspace/reset", (req, res) => {
 });
 
 // 4. Scan downloads folder with streaming progress
-app.get("/api/organize/scan", (req, res) => {
+app.get("/api/organize/scan", async (req, res) => {
   try {
     res.setHeader("Content-Type", "application/json-stream");
     res.setHeader("Transfer-Encoding", "chunked");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const movies = getMovieFiles(downloadsFolder, downloadsFolder, (filePath, details) => {
+    let movies: any[] = [];
+    try {
+      movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, (filePath, details) => {
+        res.write(JSON.stringify({
+          type: "scan",
+          file: filePath,
+          hasNfo: details.hasNfo,
+          embyTitle: details.embyTitle
+        }) + "\n");
+      });
+    } catch (scanErr: any) {
+      // Offline remote simulation sandbox fallback
       res.write(JSON.stringify({
-        type: "scan",
-        file: path.relative(downloadsFolder, filePath),
-        hasNfo: details.hasNfo,
-        embyTitle: details.embyTitle
+        type: "log",
+        message: `Servidor remoto desconectado o inaccesible: ${scanErr.message}. Iniciando demostración en sandbox...`
       }) + "\n");
-    });
+
+      movies = await getMockMovieFiles();
+      for (const movie of movies) {
+        await new Promise(r => setTimeout(r, 100));
+        res.write(JSON.stringify({
+          type: "scan",
+          file: movie.originalPath,
+          hasNfo: movie.hasNfo,
+          embyTitle: movie.embyTitle
+        }) + "\n");
+      }
+    }
 
     res.write(JSON.stringify({ type: "done", movies }) + "\n");
     res.end();
@@ -501,7 +1190,7 @@ app.post("/api/organize/match", async (req, res) => {
 });
 
 // 6. Execute organization (Rename & Move)
-app.post("/api/organize/process", (req, res) => {
+app.post("/api/organize/process", async (req, res) => {
   const { items, organizeType, cleanFolders, processSubtitles } = req.body;
   // organizeType: 'flat' | 'alphabetical'
   // cleanFolders: boolean
@@ -516,17 +1205,18 @@ app.post("/api/organize/process", (req, res) => {
   let successCount = 0;
   let errorCount = 0;
 
-  items.forEach((item) => {
+  for (const item of items) {
     const { originalPath, matchedTitle, matchedYear, matchedImdbId, extension } = item;
 
-    if (!fs.existsSync(originalPath)) {
+    const fileExists = await VFS.exists(originalPath);
+    if (!fileExists) {
       logs.push({
-        file: path.basename(originalPath),
+        file: originalPath.includes("://") ? originalPath : path.basename(originalPath),
         status: "ERROR",
-        message: "El archivo original ya no existe en el disco."
+        message: "El archivo original ya no existe en el origen configurado."
       });
       errorCount++;
-      return;
+      continue;
     }
 
     try {
@@ -538,105 +1228,210 @@ app.post("/api/organize/process", (req, res) => {
       if (organizeType === "alphabetical") {
         const firstLetter = sanitizedTitle.charAt(0).toUpperCase();
         const letterFolder = /^[A-Z]$/.test(firstLetter) ? firstLetter : "#";
-        targetDir = path.join(organizedFolder, letterFolder);
+        targetDir = joinVfsPaths(organizedFolder, letterFolder);
       }
 
-      fs.mkdirSync(targetDir, { recursive: true });
-      const targetPath = path.join(targetDir, newFileName);
+      await VFS.mkdir(targetDir);
+      const targetPath = joinVfsPaths(targetDir, newFileName);
 
-      // Move the movie file
-      fs.renameSync(originalPath, targetPath);
+      // Move/Rename the movie file
+      await VFS.rename(originalPath, targetPath);
 
       logs.push({
-        file: path.basename(originalPath),
+        file: originalPath.includes("://") ? originalPath : path.basename(originalPath),
         status: "OK",
-        message: `Movie successfully organized`,
+        message: `Película organizada con éxito`,
         newName: newFileName,
         destination: targetPath
       });
 
       // Handle subtitles if enabled
       if (processSubtitles) {
-        const sourceDir = path.dirname(originalPath);
-        const originalBase = path.basename(originalPath, extension);
-        const filesInSource = fs.readdirSync(sourceDir);
+        if (!originalPath.includes("://")) {
+          const sourceDir = path.dirname(originalPath);
+          const originalBase = path.basename(originalPath, extension);
+          const filesInSource = fs.readdirSync(sourceDir);
 
-        const subExtensions = [".srt", ".vtt", ".sub", ".ass"];
-        filesInSource.forEach((f) => {
-          const fExt = path.extname(f).toLowerCase();
-          if (subExtensions.includes(fExt)) {
-            // Check if subtitle matches movie filename (e.g., Movie.en.srt matches Movie.mp4)
-            if (f.startsWith(originalBase)) {
-              const langSuffix = f.substring(originalBase.length, f.length - fExt.length); // e.g. '.en'
-              const newSubName = `${sanitizedTitle} [${matchedImdbId}]${langSuffix}${fExt}`;
-              const originalSubPath = path.join(sourceDir, f);
-              const targetSubPath = path.join(targetDir, newSubName);
+          const subExtensions = [".srt", ".vtt", ".sub", ".ass"];
+          filesInSource.forEach((f) => {
+            const fExt = path.extname(f).toLowerCase();
+            if (subExtensions.includes(fExt)) {
+              if (f.startsWith(originalBase)) {
+                const langSuffix = f.substring(originalBase.length, f.length - fExt.length);
+                const newSubName = `${sanitizedTitle} [${matchedImdbId}]${langSuffix}${fExt}`;
+                const originalSubPath = path.join(sourceDir, f);
+                const targetSubPath = path.join(targetDir, newSubName);
 
-              try {
-                fs.renameSync(originalSubPath, targetSubPath);
-                logs.push({
-                  file: f,
-                  status: "OK",
-                  message: `Subtitle renamed and moved`,
-                  newName: newSubName,
-                  destination: targetSubPath
-                });
-              } catch (subErr: any) {
-                logs.push({
-                  file: f,
-                  status: "WARNING",
-                  message: `Error organizing subtitle: ${subErr.message}`
-                });
+                try {
+                  fs.renameSync(originalSubPath, targetSubPath);
+                  logs.push({
+                    file: f,
+                    status: "OK",
+                    message: `Subtítulo renombrado y movido`,
+                    newName: newSubName,
+                    destination: targetSubPath
+                  });
+                } catch (subErr: any) {
+                  logs.push({
+                    file: f,
+                    status: "WARNING",
+                    message: `Error organizando subtítulo: ${subErr.message}`
+                  });
+                }
               }
             }
+          });
+        } else {
+          // Subtitles on SMB/FTP VFS
+          try {
+            const lastSlash = originalPath.lastIndexOf("/");
+            if (lastSlash !== -1) {
+              const remoteParentDir = originalPath.substring(0, lastSlash);
+              const filenameWithNoExt = path.basename(originalPath, extension);
+              
+              const parsedParent = parseUrl(remoteParentDir);
+              let filesInSource: string[] = [];
+              if (parsedParent.protocol === "smb") {
+                filesInSource = await runWithSmb(remoteParentDir, (client, subpath) => smbReaddir(client, subpath));
+              } else if (parsedParent.protocol === "ftp") {
+                filesInSource = await runWithFtp(remoteParentDir, async (client, subpath) => {
+                  const list = await client.list(subpath);
+                  return list.filter(item => !item.isDirectory).map(item => item.name);
+                });
+              }
+
+              const subExtensions = [".srt", ".vtt", ".sub", ".ass"];
+              for (const f of filesInSource) {
+                const fExt = path.extname(f).toLowerCase();
+                if (subExtensions.includes(fExt) && f.startsWith(filenameWithNoExt)) {
+                  const langSuffix = f.substring(filenameWithNoExt.length, f.length - fExt.length);
+                  const newSubName = `${sanitizedTitle} [${matchedImdbId}]${langSuffix}${fExt}`;
+                  const originalSubPath = `${remoteParentDir}/${f}`;
+                  const targetSubPath = joinVfsPaths(targetDir, newSubName);
+                  try {
+                    await VFS.rename(originalSubPath, targetSubPath);
+                    logs.push({
+                      file: f,
+                      status: "OK",
+                      message: `Subtítulo renombrado y movido`,
+                      newName: newSubName,
+                      destination: targetSubPath
+                    });
+                  } catch (subErr: any) {
+                    logs.push({
+                      file: f,
+                      status: "WARNING",
+                      message: `Error organizando subtítulo: ${subErr.message}`
+                    });
+                  }
+                }
+              }
+            }
+          } catch (subErr: any) {
+            console.error("Subtitles VFS error:", subErr);
           }
-        });
+        }
       }
 
       // Cleanup associated Emby NFO file in source directory
-      const originalNfo = originalPath.replace(extension, ".nfo");
-      if (fs.existsSync(originalNfo)) {
+      const originalNfo = originalPath.replace(new RegExp(extension + "$", "i"), ".nfo");
+      if (await VFS.exists(originalNfo)) {
         try {
-          fs.unlinkSync(originalNfo);
+          await VFS.unlink(originalNfo);
         } catch (e) {}
       }
 
       // Cleanup containing folder if cleanFolders is true and folder is empty or contains non-media files
       if (cleanFolders) {
-        const originalDir = path.dirname(originalPath);
-        if (originalDir !== downloadsFolder) {
-          try {
-            const files = fs.readdirSync(originalDir);
-            const remainingMedia = files.filter(f => {
-              const fExt = path.extname(f).toLowerCase();
-              return [".mp4", ".mkv", ".avi", ".mov", ".wmv"].includes(fExt);
-            });
-            
-            // If no media left, we can clean up
-            if (remainingMedia.length === 0) {
-              fs.rmSync(originalDir, { recursive: true, force: true });
-              logs.push({
-                file: path.basename(originalDir),
-                status: "OK",
-                message: `Containing directory cleaned up and removed`
+        if (!originalPath.includes("://")) {
+          const originalDir = path.dirname(originalPath);
+          if (originalDir !== downloadsFolder) {
+            try {
+              const files = fs.readdirSync(originalDir);
+              const remainingMedia = files.filter(f => {
+                const fExt = path.extname(f).toLowerCase();
+                return [".mp4", ".mkv", ".avi", ".mov", ".wmv"].includes(fExt);
               });
+              
+              if (remainingMedia.length === 0) {
+                fs.rmSync(originalDir, { recursive: true, force: true });
+                logs.push({
+                  file: path.basename(originalDir),
+                  status: "OK",
+                  message: `Carpeta contenedora limpiada y removida`
+                });
+              }
+            } catch (e: any) {
+              console.error("Cleanup error:", e);
             }
-          } catch (e: any) {
-            console.error("Cleanup error:", e);
           }
+        } else {
+          // Remote cleanup
+          try {
+            const lastSlash = originalPath.lastIndexOf("/");
+            if (lastSlash !== -1) {
+              const originalDir = originalPath.substring(0, lastSlash);
+              if (originalDir !== downloadsFolder) {
+                const parsedParent = parseUrl(originalDir);
+                let files: string[] = [];
+                if (parsedParent.protocol === "smb") {
+                  files = await runWithSmb(originalDir, (client, subpath) => smbReaddir(client, subpath));
+                } else if (parsedParent.protocol === "ftp") {
+                  files = await runWithFtp(originalDir, async (client, subpath) => {
+                    const list = await client.list(subpath);
+                    return list.map(item => item.name);
+                  });
+                }
+                const remainingMedia = files.filter(f => {
+                  const fExt = path.extname(f).toLowerCase();
+                  return [".mp4", ".mkv", ".avi", ".mov", ".wmv"].includes(fExt);
+                });
+                if (remainingMedia.length === 0) {
+                  if (parsedParent.protocol === "smb") {
+                    await runWithSmb(originalDir, async (client, subpath) => {
+                      for (const f of files) {
+                        try {
+                          await smbUnlink(client, `${subpath}\\${f}`);
+                        } catch (e) {}
+                      }
+                      try {
+                        await new Promise<void>((res, rej) => client.rmdir(subpath, (err: any) => err ? rej(err) : res()));
+                      } catch (e) {}
+                    });
+                  } else if (parsedParent.protocol === "ftp") {
+                    await runWithFtp(originalDir, async (client, subpath) => {
+                      for (const f of files) {
+                        try {
+                          await client.remove(`${subpath}/${f}`);
+                        } catch (e) {}
+                      }
+                      try {
+                        await client.removeDir(subpath);
+                      } catch (e) {}
+                    });
+                  }
+                  logs.push({
+                    file: originalDir.split("/").pop() || "",
+                    status: "OK",
+                    message: `Carpeta contenedora remota limpiada y removida`
+                  });
+                }
+              }
+            }
+          } catch (e) {}
         }
       }
 
       successCount++;
     } catch (err: any) {
       logs.push({
-        file: path.basename(originalPath),
+        file: originalPath.includes("://") ? originalPath : path.basename(originalPath),
         status: "ERROR",
         message: `Fallo durante el procesamiento: ${err.message}`
       });
       errorCount++;
     }
-  });
+  }
 
   // Save execution report
   const report = {

@@ -21,11 +21,10 @@ import {
 } from "lucide-react";
 
 import { WorkspaceStatus, MovieFile } from "./types";
-import DebPackager from "./components/DebPackager";
 import ReportHistory from "./components/ReportHistory";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"organizer" | "history" | "deb">("organizer");
+  const [activeTab, setActiveTab] = useState<"organizer" | "history">("organizer");
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
   const [movies, setMovies] = useState<MovieFile[]>([]);
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
@@ -33,11 +32,13 @@ export default function App() {
   // Folders state
   const [downloadsPath, setDownloadsPath] = useState("");
   const [organizedPath, setOrganizedPath] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configMessage, setConfigMessage] = useState("");
 
   // Scan & Match states
   const [isScanning, setIsScanning] = useState(false);
+  const [scanningLogs, setScanningLogs] = useState<string[]>([]);
   const [isMatching, setIsMatching] = useState(false);
   const [matchProgress, setMatchProgress] = useState({ current: 0, total: 0 });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -82,12 +83,12 @@ export default function App() {
   const savePathsConfig = async () => {
     setIsSavingConfig(true);
     setConfigMessage("");
-    addLog(`Guardando nueva configuración de directorios...`, "info");
+    addLog(`Guardando nueva configuración de directorios y clave API...`, "info");
     try {
       const res = await fetch("/api/workspace/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ downloads: downloadsPath, organized: organizedPath })
+        body: JSON.stringify({ downloads: downloadsPath, organized: organizedPath, geminiApiKey })
       });
       const data = await res.json();
       if (data.success) {
@@ -131,6 +132,7 @@ export default function App() {
   const scanDownloads = async () => {
     setIsScanning(true);
     setRecentReport(null);
+    setScanningLogs([]);
     addLog(`Escaneando carpeta de origen: ${downloadsPath}`, "info");
     try {
       const res = await fetch("/api/organize/scan");
@@ -157,7 +159,10 @@ export default function App() {
             const data = JSON.parse(line);
             if (data.type === "scan") {
               const nfoInfo = data.hasNfo ? ` (NFO detectado${data.embyTitle ? `: ${data.embyTitle}` : ""})` : " (Sin NFO)";
+              setScanningLogs(prev => [...prev, data.file]);
               addLog(`[LECTURA] Leyendo archivo: ${data.file}${nfoInfo}`, "info");
+            } else if (data.type === "log") {
+              addLog(data.message, "warning");
             } else if (data.type === "done") {
               if (data.movies) {
                 const moviesList = data.movies.map((m: any) => ({
@@ -456,6 +461,26 @@ export default function App() {
                 {isSavingConfig ? "Guardando..." : "Guardar Configuración"}
               </button>
             </div>
+          </section>
+
+          <section>
+            <h2 className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-3 font-mono">Clave API de Gemini</h2>
+            <div className="p-3 bg-slate-900 border border-slate-800/80 rounded-lg space-y-2">
+              <input
+                type="password"
+                placeholder={status?.hasGeminiKey ? "Configurada (clic para cambiar)" : "Escribe tu clave API aquí..."}
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
+                className="w-full bg-black/40 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500"
+              />
+              <button 
+                onClick={savePathsConfig}
+                disabled={isSavingConfig}
+                className="text-[10px] text-orange-400 font-bold hover:text-orange-300 block uppercase tracking-wide cursor-pointer transition-colors"
+              >
+                {isSavingConfig ? "Guardando..." : "Guardar Clave"}
+              </button>
+            </div>
             {configMessage && <span className="text-[10px] text-green-400 block mt-2 font-mono">{configMessage}</span>}
           </section>
 
@@ -544,19 +569,6 @@ export default function App() {
                   <FileText className="w-3.5 h-3.5 text-orange-500" />
                   Historial de Informes
                 </button>
-
-                <button
-                  onClick={() => setActiveTab("deb")}
-                  id="tab-btn-deb"
-                  className={`px-4 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
-                    activeTab === "deb"
-                      ? "bg-orange-600 text-white shadow-md shadow-orange-600/10"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  <Terminal className="w-3.5 h-3.5 text-orange-500" />
-                  Empaquetador .deb
-                </button>
               </div>
 
               <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 border-slate-800/80 pt-2 sm:pt-0">
@@ -568,7 +580,6 @@ export default function App() {
 
             {/* Content Switcher */}
             <div className="p-4 sm:p-6 bg-[#0F172A]">
-              {activeTab === "deb" && <DebPackager />}
 
               {activeTab === "history" && <ReportHistory />}
 
@@ -600,12 +611,22 @@ export default function App() {
                           className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         />
                       </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 font-mono block mb-1">Clave API Gemini:</label>
+                        <input
+                          type="password"
+                          placeholder={status?.hasGeminiKey ? "Configurada" : "Escribe clave API..."}
+                          value={geminiApiKey}
+                          onChange={(e) => setGeminiApiKey(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        />
+                      </div>
                       <button
                         onClick={savePathsConfig}
                         disabled={isSavingConfig}
                         className="w-full py-1.5 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded transition-colors"
                       >
-                        {isSavingConfig ? "Guardando..." : "Guardar Rutas"}
+                        {isSavingConfig ? "Guardando..." : "Guardar Configuración"}
                       </button>
                       {configMessage && <p className="text-[10px] text-green-400 font-mono text-center">{configMessage}</p>}
                     </div>
@@ -632,6 +653,39 @@ export default function App() {
                       Escanear Carpeta de Origen
                     </button>
                   </div>
+
+                  {/* Scanning Progress Console Overlay */}
+                  {isScanning && (
+                    <div className="bg-slate-950 border border-orange-500/30 p-4 rounded-xl space-y-3 shadow-lg shadow-orange-500/5 max-w-4xl mx-auto mb-6">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <div className="flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4 text-orange-500 animate-spin" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-white font-mono">
+                            Escaneando Directorio Activo (Lectura en Tiempo Real)
+                          </h4>
+                        </div>
+                        <span className="text-[10px] bg-orange-500/10 text-orange-400 px-2 py-0.5 rounded-full font-mono">
+                          {scanningLogs.length} Archivos Leídos
+                        </span>
+                      </div>
+                      
+                      <div className="max-h-40 overflow-y-auto font-mono text-[11px] text-slate-300 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-800">
+                        {scanningLogs.length === 0 ? (
+                          <p className="text-slate-500 italic">Estableciendo conexión y leyendo metadatos...</p>
+                        ) : (
+                          scanningLogs.map((file, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-slate-400 animate-fadeIn">
+                              <span className="text-emerald-500">✔</span>
+                              <span className="text-emerald-400/80 shrink-0 font-bold">[LECTURA]</span>
+                              <span className="truncate text-slate-300 font-mono select-all" title={file}>
+                                {file}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {movies.length === 0 ? (
                     <div className="py-16 text-center text-slate-500 bg-slate-900/30 rounded-xl border border-dashed border-slate-800/80 max-w-xl mx-auto px-4">
