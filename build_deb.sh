@@ -113,6 +113,41 @@ if [ -x /usr/bin/update-desktop-database ]; then
 fi
 
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
+        systemctl daemon-reload || true
+    fi
+  
+    exit 0
+    EOF
+    chmod 755 "$BUILD_DIR/DEBIAN/postrm"
+  
+    echo "=== 5. Copying application files ==="
+    cp -r dist/ "$BUILD_DIR/usr/share/movie-organizer/"
+    cp gui.py "$BUILD_DIR/usr/share/movie-organizer/"
+  
+    echo "=== 6. Creating systemd service ==="
+    cat << 'SVCEOF' > "$BUILD_DIR/lib/systemd/system/movie-organizer.service"
+    [Unit]
+    Description=Servicio Web del Organizador de Películas
+    After=network.target
+  
+    [Service]
+    Type=simple
+    User=root
+    WorkingDirectory=/usr/share/movie-organizer
+    Environment=NODE_ENV=production
+    Environment=PORT=3000
+    ExecStart=/usr/bin/movie-organizer
+    Restart=on-failure
+    RestartSec=5
+  
+    [Install]
+    WantedBy=multi-user.target
+    SVCEOF
+  
+    echo "=== 7. Building .deb package ==="
+    dpkg-deb --build "$BUILD_DIR" "$DEB_DEST"
+    echo "Package built: $DEB_DEST"
+
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
 fi
 
