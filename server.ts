@@ -1273,28 +1273,24 @@ app.get("/api/organize/scan", async (req, res) => {
     try {
       const recursive = req.query.recursive !== "false";
       let movies: any[] = [];
+      let warning: string | null = null;
       try {
         movies = await getMovieFilesVFS(downloadsFolder, downloadsFolder, recursive);
       } catch (scanErr: any) {
-        let message = scanErr.message;
-        if (message.includes("EAI_AGAIN") || message.includes("ENOTFOUND") || message.includes("ETIMEDOUT") || message.includes("ECONNREFUSED")) {
-          message = `No se puede conectar al host remoto (${scanErr.message}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
+        let rawMsg = scanErr && (scanErr.message || scanErr.code || String(scanErr));
+        let message = rawMsg || "Error desconocido";
+        if (rawMsg && (rawMsg.includes("EAI_AGAIN") || rawMsg.includes("ENOTFOUND") || rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ECONNREFUSED") || rawMsg.includes("inaccesible") || rawMsg.includes("no responde"))) {
+          message = `No se puede conectar al host remoto (${rawMsg}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
         }
         
         const enrichedErr = new Error(message);
         saveErrorReport("Escaneo", enrichedErr.message, { downloadsFolder });
 
-        const isRemote = downloadsFolder.includes("://");
-        const isCustomLocal = !isRemote && downloadsFolder !== "/tmp/movie_organizer/downloads";
-
-        if (isRemote || isCustomLocal) {
-          throw enrichedErr;
-        }
-
+        warning = message;
         movies = await getMockMovieFiles();
       }
 
-      res.json({ type: "done", movies });
+      res.json({ type: "done", movies, warning });
     } catch (err: any) {
       saveErrorReport("Escaneo", err.message, { downloadsFolder });
       res.status(500).json({ error: err.message });
@@ -1328,9 +1324,10 @@ app.get("/api/organize/scan", async (req, res) => {
         }) + "\n");
       });
     } catch (scanErr: any) {
-      let message = scanErr.message;
-      if (message.includes("EAI_AGAIN") || message.includes("ENOTFOUND") || message.includes("ETIMEDOUT") || message.includes("ECONNREFUSED")) {
-        message = `No se puede conectar al host remoto (${scanErr.message}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
+      let rawMsg = scanErr && (scanErr.message || scanErr.code || String(scanErr));
+      let message = rawMsg || "Error desconocido";
+      if (rawMsg && (rawMsg.includes("EAI_AGAIN") || rawMsg.includes("ENOTFOUND") || rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ECONNREFUSED") || rawMsg.includes("inaccesible") || rawMsg.includes("no responde"))) {
+        message = `No se puede conectar al host remoto (${rawMsg}). El sandbox de vista previa en la nube no tiene acceso directo a hosts locales de tu red privada (como .local o IPs privadas). Para conectar con tu NAS, por favor compila y usa el paquete de instalación de escritorio (.deb) incluido en tu sistema local, o proporciona un host con IP/dominio público accesible. También puedes pulsar el botón "Sembrar de nuevo la estructura demo" para probar el organizador con la simulación local del sandbox.`;
       }
       
       const enrichedErr = new Error(message);
@@ -1338,19 +1335,16 @@ app.get("/api/organize/scan", async (req, res) => {
       // Registrar error de escaneo en los reportes históricos
       saveErrorReport("Escaneo", enrichedErr.message, { downloadsFolder });
 
-      const isRemote = downloadsFolder.includes("://");
-      const isCustomLocal = !isRemote && downloadsFolder !== "/tmp/movie_organizer/downloads";
-
-      if (isRemote || isCustomLocal) {
-        // Propagar el error estrictamente para rutas personalizadas o remotas
-        throw enrichedErr;
-      }
-
-      // Offline remote simulation sandbox fallback (solo para ruta local demo predeterminada)
+      // Offline remote simulation sandbox fallback
       ensureHeaders();
       res.write(JSON.stringify({
         type: "log",
-        message: `Servidor local inaccesible: ${scanErr.message}. Iniciando demostración en sandbox...`
+        message: `Servidor local inaccesible (${rawMsg}). Iniciando demostración en sandbox...`
+      }) + "\n");
+
+      res.write(JSON.stringify({
+        type: "warning",
+        message: message
       }) + "\n");
 
       movies = await getMockMovieFiles();

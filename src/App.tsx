@@ -35,6 +35,7 @@ export default function App() {
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem("geminiApiKey") || "");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configMessage, setConfigMessage] = useState("");
+  const [scanWarning, setScanWarning] = useState<string | null>(null);
 
   // Scan & Match states
   const [isScanning, setIsScanning] = useState(false);
@@ -165,6 +166,7 @@ export default function App() {
     setIsScanning(true);
     setRecentReport(null);
     setScanningLogs([]);
+    setScanWarning(null);
     addLog(`Escaneando carpeta de origen: ${downloadsPath} (Subcarpetas: ${recursiveScan ? 'SÍ' : 'NO'})`, "info");
     try {
       try {
@@ -205,6 +207,9 @@ export default function App() {
                 addLog(`[LECTURA] Leyendo archivo: ${data.file}${nfoInfo}`, "info");
               } else if (data.type === "log") {
                 addLog(data.message, "warning");
+              } else if (data.type === "warning") {
+                setScanWarning(data.message);
+                addLog(`Advertencia: ${data.message}`, "warning");
               } else if (data.type === "done") {
                 if (data.movies) {
                   const moviesList = data.movies.map((m: any) => ({
@@ -240,6 +245,9 @@ export default function App() {
         }
 
         const data = await res.json();
+        if (data.warning) {
+          setScanWarning(data.warning);
+        }
         if (data.type === "done" && data.movies) {
           const moviesList = data.movies.map((m: any) => ({
             ...m,
@@ -812,6 +820,22 @@ export default function App() {
                             </div>
                           ))
                         )}
+                      </div>
+                    </div>
+                  )}
+
+                  {scanWarning && (
+                    <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-xl flex items-start gap-3 text-amber-200 animate-fadeIn mb-6">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
+                      <div className="text-xs space-y-1">
+                        <h4 className="font-bold text-amber-300">Modo de Demostración Activo</h4>
+                        <p>{scanWarning}</p>
+                        <button 
+                          onClick={() => setScanWarning(null)} 
+                          className="mt-2 text-[10px] bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 font-bold px-2.5 py-1 rounded cursor-pointer transition-colors"
+                        >
+                          Entendido
+                        </button>
                       </div>
                     </div>
                   )}
